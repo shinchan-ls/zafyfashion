@@ -1,0 +1,265 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ====================== NEXTAUTH MODELS ======================
+model Account {
+  id                String @id @default(cuid())
+  userId            Int
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       Int
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ====================== USER ======================
+model User {
+  id            Int      @id @default(autoincrement())
+  googleId      String?  @unique
+  email         String   @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  passwordHash  String?
+  role          String   @default("customer")
+  authProvider  String   @default("google")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts   Account[]
+  sessions   Session[]
+  orders     Order[]
+  wishlists  Wishlist[]
+  cartItems  CartItem[]
+  addresses  Address[]
+
+  @@map("users")
+}
+
+// ====================== PRODUCT ======================
+model Product {
+  id                BigInt   @id
+  title             String
+  slug              String   @unique
+  handle            String   @unique
+  price             Decimal  @db.Decimal(10, 2)
+  compareAtPrice    Decimal? @db.Decimal(10, 2)
+  discountPercentage Int     @default(0)
+  stockQuantity     Int      @default(0)
+
+  category     String
+  subCategory  String?
+  size         String?
+  color        String?
+  description  String?
+  images       String[]
+  tags         String[]     @default([])
+  variants     Json?
+
+  status       String       @default("Out of Stock")
+  vendor       String?
+
+  isFeatured   Boolean      @default(false)
+  isNewArrival Boolean      @default(false)
+
+  averageRating Decimal     @default(0.0) @db.Decimal(3, 2)
+  reviewCount   Int         @default(0)
+  weightGrams   Int         @default(200)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  wishlists  Wishlist[]
+
+  @@index([category])
+  @@index([isFeatured])
+  @@index([isNewArrival])
+  @@index([stockQuantity])
+  @@map("products")
+}
+
+// ====================== ORDER (Selloship Ready) ======================
+model Order {
+  id                    Int      @id @default(autoincrement())
+  userId                Int      // NOT NULL
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  orderNumber           String   @unique
+
+  totalAmount           Decimal  @db.Decimal(10, 2)
+  discountAmount        Decimal  @default(0) @db.Decimal(10, 2)
+  shippingCharges       Decimal  @default(0) @db.Decimal(10, 2)
+  finalAmount           Decimal  @db.Decimal(10, 2)
+
+  status                String   @default("Pending")
+  paymentMethod         String?
+  paymentStatus         String   @default("PENDING")
+
+  customerName          String
+  customerPhone         String
+  customerEmail         String?
+
+  shippingAddress       String
+  city                  String
+  state                 String
+  pincode               String
+
+  // Selloship fields
+  selloshipOrderId      String?
+  selloshipTrackingId   String?
+  selloshipAwbNumber    String?
+  selloshipLabelUrl     String?
+  selloshipStatus       String?
+  courierName           String?
+  estimatedDeliveryDate DateTime?
+  actualDeliveryDate    DateTime?
+
+  orderNotes            String?
+  cancellationReason    String?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  items                 OrderItem[]
+  trackingEvents        OrderTrackingEvent[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([selloshipOrderId])
+  @@index([selloshipTrackingId])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+// ====================== ORDER ITEM ======================
+model OrderItem {
+  id          Int     @id @default(autoincrement())
+  orderId     Int
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId   BigInt
+  product     Product @relation(fields: [productId], references: [id])
+
+  title       String
+  price       Decimal @db.Decimal(10, 2)
+  quantity    Int
+  size        String?
+  color       String?
+  subtotal    Decimal @db.Decimal(10, 2)
+
+  @@map("order_items")
+}
+
+// ====================== CART ======================
+model CartItem {
+  id          Int     @id @default(autoincrement())
+  userId      Int
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId   BigInt
+  product     Product @relation(fields: [productId], references: [id])
+
+  quantity    Int
+  size        String?
+  color       String?
+
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, productId, size, color])
+  @@map("cart_items")
+}
+
+// ====================== ORDER TRACKING EVENTS (Selloship Sync) ======================
+model OrderTrackingEvent {
+  id          Int      @id @default(autoincrement())
+  orderId     Int
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  status      String   // Shipped, In-Transit, OutForDelivery, Delivered, etc.
+  message     String
+  location    String?
+  timestamp   DateTime @default(now())
+
+  // Selloship specific
+  selloshipStatus String?
+  courierName     String?
+
+  @@index([orderId])
+  @@index([timestamp])
+  @@map("order_tracking_events")
+}
+
+// ====================== ADDRESS ======================
+model Address {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  phone       String
+  address     String
+  city        String
+  state       String
+  pincode     String
+  landmark    String?
+  isDefault   Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+
+  @@map("addresses")
+}
+
+// ====================== WISHLIST ======================
+model Wishlist {
+  id         Int    @id @default(autoincrement())
+  userId     Int
+  productId  BigInt
+
+  user       User    @relation(fields: [userId], references: [id])
+  product    Product @relation(fields: [productId], references: [id])
+
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@map("wishlists")
+}

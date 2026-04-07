@@ -1,65 +1,145 @@
+// app/page.tsx
+"use client";
+
 import Image from "next/image";
+import Link from "next/link";
+import ProductCard from "@/components/ProductCard";
+import Navbar from "@/components/Navbar";   // ← Yeh line add ki hai
+import { useEffect, useState } from "react";
+import HeroSlider from "@/components/HeroSlider";
+
+// Category Configuration
+const categories = [
+  { name: "Perfumes", slug: "perfumes" },
+  { name: "Watches", slug: "watches" },
+  { name: "Men's Wallets", slug: "wallets" },
+  { name: "Sunglasses", slug: "sunglasses" },
+  { name: "Belts", slug: "belts" },
+  { name: "Shoes", slug: "shoes" },
+];
 
 export default function Home() {
+  const [trendingProducts, setTrendingProducts] = useState<any[]>([]);
+  const [categoryImages, setCategoryImages] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/products?limit=20");
+        const allProducts = await res.json();
+
+        if (Array.isArray(allProducts)) {
+          setTrendingProducts(allProducts.slice(0, 8));
+
+          const imagesMap: Record<string, string> = {};
+
+          categories.forEach((cat) => {
+            const found = allProducts.find((p: any) =>
+              p.category?.toLowerCase().includes(cat.slug) ||
+              p.subCategory?.toLowerCase().includes(cat.slug)
+            );
+
+            imagesMap[cat.slug] = found?.images?.[0]
+              ? found.images[0]
+              : "https://images.zafyfashion.com/products/default.jpg";
+          });
+
+          setCategoryImages(imagesMap);
+        }
+      } catch (error) {
+        console.error("Failed to fetch homepage data:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+
+
+      {/* Rolling Bar - Exact like Reference */}
+      <div className="bg-black text-white py-2 text-xs md:text-sm overflow-hidden">
+        <div className="flex w-max animate-marquee">
+
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="flex gap-12 px-6">
+              <span>WELCOME TO OUR STORE</span>
+              <span>FREE DELIVERY ALL OVER INDIA</span>
+              <span>CASH ON DELIVERY AVAILABLE</span>
+            </div>
+          ))}
+
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </div>
+
+      {/* Navbar */}
+      < Navbar />
+
+    <HeroSlider />
+
+      {/* Shop by Category */}
+      <div className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-6">
+          <h2 className="text-4xl font-light text-center mb-12 tracking-wide">
+            Shop by Category
+          </h2>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+            {categories.map((cat) => {
+              const imageUrl = categoryImages[cat.slug] || "https://images.zafyfashion.com/products/default.jpg";
+
+              return (
+                <Link
+                  key={cat.slug}
+                  href={`/category/${cat.slug}`}
+                  className="group relative aspect-[4/3.2] overflow-hidden rounded-2xl shadow-sm hover:shadow-2xl transition-all duration-500"
+                >
+                  <Image
+                    src={imageUrl}
+                    alt={cat.name}
+                    fill
+                    sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 16vw"
+                    className="object-cover group-hover:scale-110 transition-transform duration-700"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+                  <div className="absolute bottom-6 left-6 text-white z-10">
+                    <h3 className="text-2xl font-medium tracking-widest">
+                      {cat.name.toUpperCase()}
+                    </h3>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
-      </main>
-    </div>
+      </div>
+
+      {/* Trending Products */}
+      <div className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex justify-between items-end mb-10">
+            <h2 className="text-4xl font-light">Trending Products</h2>
+            <Link href="/products" className="text-black hover:underline text-sm font-medium">
+              View All →
+            </Link>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-12">Loading trending products...</div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+              {trendingProducts.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
