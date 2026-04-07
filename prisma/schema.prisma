@@ -223,7 +223,7 @@ model OrderTrackingEvent {
   // Selloship specific
   selloshipStatus String?
   courierName     String?
-
+  @@unique([orderId, status])   // ← Yeh line add kar do
   @@index([orderId])
   @@index([timestamp])
   @@map("order_tracking_events")

@@ -1,4 +1,3 @@
-// app/api/user/addresses/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/app/api/auth/[...nextauth]/route";
@@ -18,28 +17,34 @@ export async function GET(req: NextRequest) {
       select: {
         id: true,
         name: true,
-        phone: true,
-        address: true,
-        city: true,
-        state: true,
-        pincode: true,
+        addresses: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            address: true,
+            city: true,
+            state: true,
+            pincode: true,
+          },
+        },
       },
     });
 
-    if (!user || !user.address) {
-      return NextResponse.json([]); // No address saved
+    if (!user || !user.addresses || user.addresses.length === 0) {
+      return NextResponse.json([]); // No addresses
     }
 
-    // Convert to array format for frontend
-    const addresses = [{
-      id: user.id.toString(),
-      name: user.name || "",
-      phone: user.phone || "",
-      address: user.address,
-      city: user.city || "",
-      state: user.state || "",
-      pincode: user.pincode || "",
-    }];
+    // Format for frontend
+    const addresses = user.addresses.map((addr) => ({
+      id: addr.id.toString(),
+      name: addr.name || user.name || "",
+      phone: addr.phone || "",
+      address: addr.address,
+      city: addr.city || "",
+      state: addr.state || "",
+      pincode: addr.pincode || "",
+    }));
 
     return NextResponse.json(addresses);
   } catch (error) {
