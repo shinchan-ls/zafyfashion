@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Format for frontend
-    const addresses = user.addresses.map((addr) => ({
+    const addresses = user.addresses.map((addr: any) => ({
       id: addr.id.toString(),
       name: addr.name || user.name || "",
       phone: addr.phone || "",
