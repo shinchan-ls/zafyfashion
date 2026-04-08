@@ -2,26 +2,17 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const url = req.nextUrl;
+  const url = req.nextUrl.clone();
 
-  // ✅ Force non-www → www OR vice versa (choose ONE)
-  if (url.hostname === "www.zafyfashion.com") {
+  // Only redirect if hostname EXACTLY matches
+  if (req.headers.get("host") === "www.zafyfashion.com") {
     url.hostname = "zafyfashion.com";
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(url, 308); // permanent redirect
   }
 
   return NextResponse.next();
 }
 
-// ✅ Limit middleware scope (IMPORTANT for performance)
 export const config = {
-  matcher: [
-    /*
-      Match all request paths except:
-      - _next (static files)
-      - api (API routes)
-      - favicon.ico
-    */
-    "/((?!_next|api|favicon.ico).*)",
-  ],
+  matcher: ["/((?!_next|api|favicon.ico).*)"],
 };
