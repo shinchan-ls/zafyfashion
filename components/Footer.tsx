@@ -1,55 +1,70 @@
+// components/Footer.tsx
 import Link from "next/link";
 
 export default function Footer() {
   return (
-    <footer className="bg-black text-gray-400 pt-16 pb-12">
-      <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-y-12">
+    <footer className="bg-black text-white pt-16 pb-8">
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10">
 
-        {/* Brand */}
-        <div>
-          <h3 className="text-white text-3xl font-bold tracking-wider mb-6">ZAFY</h3>
-          <p className="text-sm max-w-xs">
-            Premium fashion accessories for those who appreciate quality and timeless style.
-          </p>
-        </div>
+          {/* Brand + Newsletter */}
+          <div className="lg:col-span-2">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="text-3xl font-bold tracking-tighter">ZAFY</div>
+              <div className="text-sm text-gray-400">FASHION HUB</div>
+            </div>
 
-        {/* Shop */}
-        <div>
-          <h4 className="text-white font-semibold mb-5">SHOP</h4>
-          <div className="space-y-3 text-sm">
-            <Link href="/collections/watch" className="hover:text-white block">Watches</Link>
-            <Link href="/collections/eyewear" className="hover:text-white block">Eyewear</Link>
-            <Link href="/collections/wallets" className="hover:text-white block">Wallets</Link>
-            <Link href="/collections/belts" className="hover:text-white block">Belts</Link>
-            <Link href="/collections/shoes" className="hover:text-white block">Shoes</Link>
-            <Link href="/collections/perfumes" className="hover:text-white block">Perfumes</Link>
+            <p className="text-gray-400 mb-8 max-w-md">
+              Premium fashion destination offering luxury watches, perfumes, 
+              wallets, sunglasses, belts and shoes with free shipping across India.
+            </p>
           </div>
-        </div>
 
-        {/* Support */}
-        <div>
-          <h4 className="text-white font-semibold mb-5">SUPPORT</h4>
-          <div className="space-y-3 text-sm">
-            <Link href="/contact" className="hover:text-white block">Contact Us</Link>
-            <Link href="/shipping" className="hover:text-white block">Shipping</Link>
-            <Link href="/returns" className="hover:text-white block">Returns</Link>
-            <Link href="/faq" className="hover:text-white block">FAQ</Link>
+          {/* Shop */}
+          <div>
+            <h4 className="font-semibold mb-5 text-white">Shop</h4>
+            <div className="space-y-3 text-sm text-gray-400">
+              <Link href="/category/watches" className="block hover:text-white transition">Watches</Link>
+              <Link href="/category/perfumes" className="block hover:text-white transition">Perfumes</Link>
+              <Link href="/category/wallets" className="block hover:text-white transition">Wallets</Link>
+              <Link href="/category/sunglasses" className="block hover:text-white transition">Goggles</Link>
+              <Link href="/category/belts" className="block hover:text-white transition">Belts</Link>
+              <Link href="/category/shoes" className="block hover:text-white transition">Shoes</Link>
+            </div>
           </div>
-        </div>
 
-        {/* Company */}
-        <div>
-          <h4 className="text-white font-semibold mb-5">COMPANY</h4>
-          <div className="space-y-3 text-sm">
-            <Link href="/about" className="hover:text-white block">About Us</Link>
-            <Link href="/privacy" className="hover:text-white block">Privacy Policy</Link>
-            <Link href="/terms" className="hover:text-white block">Terms of Service</Link>
+          {/* Policies */}
+          <div>
+            <h4 className="font-semibold mb-5 text-white">Policies</h4>
+            <div className="space-y-3 text-sm text-gray-400">
+              <Link href="/policies/shipping-policy" className="block hover:text-white transition">Shipping Policy</Link>
+              <Link href="/policies/refund-policy" className="block hover:text-white transition">Refund & Returns</Link>
+              <Link href="/policies/privacy-policy" className="block hover:text-white transition">Privacy Policy</Link>
+              <Link href="/policies/terms-of-service" className="block hover:text-white transition">Terms of Service</Link>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div className="border-t border-gray-900 mt-16 pt-8 text-center text-xs text-gray-500">
-        © {new Date().getFullYear()} Zafy Fashion. All Rights Reserved.
+          {/* Support */}
+          <div>
+            <h4 className="font-semibold mb-5 text-white">Support</h4>
+            <div className="space-y-3 text-sm text-gray-400">
+              <Link href="/policies/contact-us" className="block hover:text-white transition">Contact Us</Link>
+            </div>
+
+            <div className="mt-8">
+              <p className="text-sm text-gray-400">Email</p>
+              <a href="mailto:zafyfashionhub@gmail.com" className="text-white hover:underline">
+                zafyfashionhub@gmail.com
+              </a>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Bottom Bar */}
+        <div className="border-t border-zinc-800 mt-16 pt-8 text-center text-xs text-gray-500">
+          © {new Date().getFullYear()} Zafy Fashion Hub. All Rights Reserved.
+        </div>
       </div>
     </footer>
   );

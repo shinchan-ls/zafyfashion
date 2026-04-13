@@ -2,12 +2,15 @@
 
 import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import Link from "next/link";
 
-export default function OrderSuccessClient() {
-  const params = useSearchParams();
+export default function OrderSuccessPage() {
+  const searchParams = useSearchParams();
   const router = useRouter();
 
-  const orderNumber = params.get("orderNumber");
+  const orderNumber = searchParams.get("orderNumber");
 
   const [loading, setLoading] = useState(true);
   const [valid, setValid] = useState(false);
@@ -29,6 +32,7 @@ export default function OrderSuccessClient() {
           router.replace("/checkout");
         }
       } catch (err) {
+        console.error("Order check failed:", err);
         router.replace("/checkout");
       } finally {
         setLoading(false);
@@ -38,14 +42,62 @@ export default function OrderSuccessClient() {
     checkOrder();
   }, [orderNumber, router]);
 
-  if (loading) return <div>Checking payment...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <Navbar />
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-4 border-black border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p>Verifying your payment...</p>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
   if (!valid) return null;
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <h1 className="text-3xl font-semibold">
-        🎉 Payment Successful! Order Confirmed
-      </h1>
+    <div className="min-h-screen bg-white flex flex-col">
+      <Navbar />
+
+      <main className="flex-1 flex items-center justify-center py-20">
+        <div className="text-center px-6 max-w-md">
+          <div className="text-6xl mb-6">🎉</div>
+          
+          <h1 className="text-4xl font-light tracking-tight mb-3">
+            Payment Successful!
+          </h1>
+          <p className="text-2xl text-green-600 font-medium mb-8">
+            Order Confirmed
+          </p>
+
+          <div className="bg-gray-50 border border-gray-200 rounded-2xl p-8 mb-10">
+            <p className="text-gray-600 mb-2">Order Number</p>
+            <p className="text-2xl font-mono tracking-widest font-semibold text-black">
+              {orderNumber}
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <Link 
+              href={`/account`}
+              className="block w-full bg-black text-white py-4 rounded-xl font-medium hover:bg-gray-800 transition"
+            >
+              View Order in Account
+            </Link>
+
+            <Link 
+              href="/products"
+              className="block w-full border border-black py-4 rounded-xl font-medium hover:bg-gray-50 transition"
+            >
+              Continue Shopping
+            </Link>
+          </div>
+        </div>
+      </main>
+
+      <Footer />
     </div>
   );
 }

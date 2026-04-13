@@ -1,345 +1,324 @@
 // app/category/[slug]/page.tsx
 "use client";
 
-import { useParams, useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useState, useMemo } from "react";
+import { useParams } from "next/navigation";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import WhatsappButton from "@/components/WhatsappButton";
+import { useWishlist } from "@/app/context/WishlistContext";
 
-const categoryNames: Record<string, string> = {
-  perfumes: "Perfumes",
-  wallets: "Men's Wallets",
-  purse: "Women Purse",
-  sunglasses: "Goggles",
-  belts: "Belts",
-  shoes: "Shoes",
-  watches: "Watches",
+const SLUG_TO_CATEGORY: Record<string, string> = {
+  shoes: "Shoes", watches: "Watches", bags: "Bags", shirts: "Shirts",
+  "t-shirts": "T-Shirts", "polo-t-shirts": "Polo T-Shirts",
+  sunglasses: "Sunglasses", perfumes: "Perfumes", wallets: "Wallets",
+  "jeans-denim": "Jeans & Denim", "jackets-hoodies": "Jackets & Hoodies",
+  belts: "Belts", "caps-hats": "Caps & Hats", bottoms: "Bottoms",
+  "coord-sets": "Coord Sets", clothing: "Clothing", accessories: "Accessories",
+  other: "Other",
+  // legacy
+  perfume: "Perfumes", wallet: "Wallets", belt: "Belts",
+  shoe: "Shoes", watch: "Watches", sunglass: "Sunglasses",
 };
 
-export default function CategoryPage() {
-  const { slug } = useParams();
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const { data: session } = useSession();
-
-  const categoryName = categoryNames[slug as string] || "Products";
-
-  const [products, setProducts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [sortOption, setSortOption] = useState("newest");
-
-  // Filters
-  const [showInStock, setShowInStock] = useState(true);
-  const [showOutOfStock, setShowOutOfStock] = useState(true);
-  const [minPrice, setMinPrice] = useState(0);
-  const [maxPrice, setMaxPrice] = useState(0);
-
-  const [wishlist, setWishlist] = useState<Set<string>>(new Set());
-
-  const itemsPerPage = 12;
-
-  // ================= FETCH PRODUCTS =================
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/products/category/${slug}`)
-      .then(res => res.json())
-      .then(data => {
-        const allProducts = Array.isArray(data) ? data : [];
-        setProducts(allProducts);
-        if (allProducts.length > 0) {
-          const maxP = Math.max(...allProducts.map((p: any) => Number(p.price) || 0));
-          setMaxPrice(maxP);
-        }
-      })
-      .finally(() => setLoading(false));
-  }, [slug]);
-
-  // ================= WISHLIST =================
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    fetch(`/api/wishlist?userId=${session.user.id}`)
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          setWishlist(new Set(data.map((item: any) => item.productId.toString())));
-        }
-      });
-  }, [session?.user?.id]);
-
-  // ================= BASE FILTER =================
-  const baseFiltered = useMemo(() => {
-    let result = [...products];
-    result = result.filter(p => p.price >= minPrice && p.price <= maxPrice);
-    return result;
-  }, [products, minPrice, maxPrice]);
-
-  const inStockCount = baseFiltered.filter(p => p.stockQuantity > 0).length;
-  const outOfStockCount = baseFiltered.filter(p => p.stockQuantity === 0).length;
-
-  // ================= FINAL FILTER + SORTING =================
-  const filteredProducts = useMemo(() => {
-    let result = [...baseFiltered];
-
-    // Stock Filter
-    result = result.filter(p => {
-      const inStock = p.stockQuantity > 0;
-      return (showInStock && inStock) || (showOutOfStock && !inStock);
-    });
-
-    // Sorting Logic
-    switch (sortOption) {
-      case "price-low":
-        result.sort((a, b) => a.price - b.price);
-        break;
-      case "price-high":
-        result.sort((a, b) => b.price - a.price);
-        break;
-      case "name-az":
-        result.sort((a, b) => a.title.localeCompare(b.title));
-        break;
-      case "newest":
-      default:
-        result.sort((a, b) =>
-          new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
-    }
-
-    return result;
-  }, [baseFiltered, showInStock, showOutOfStock, sortOption]);
-
-  // Reset page to 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [showInStock, showOutOfStock, minPrice, maxPrice, sortOption]);
-
-  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
-  const currentProducts = filteredProducts.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+function ProductSkeleton() {
+  return (
+    <div className="animate-pulse bg-white border border-gray-100 rounded-2xl overflow-hidden">
+      <div className="bg-gray-200 aspect-square" />
+      <div className="p-4 space-y-2">
+        <div className="bg-gray-200 h-3 rounded w-3/4" />
+        <div className="bg-gray-200 h-3 rounded w-1/2" />
+      </div>
+    </div>
   );
+}
 
-  const hasActiveFilters =
-    !showInStock || !showOutOfStock ||
-    minPrice > 0 || maxPrice < Math.max(...products.map(p => Number(p.price) || 0), 0);
+const LIMIT = 20;
 
-  const clearAllFilters = () => {
-    setShowInStock(true);
-    setShowOutOfStock(true);
-    setMinPrice(0);
-    setMaxPrice(Math.max(...products.map(p => Number(p.price) || 0), 0));
-  };
+export default function CategoryPage() {
+  const { slug } = useParams<{ slug: string }>();
+  const { isWishlisted, toggleWishlist } = useWishlist();
+  const dbCategory = SLUG_TO_CATEGORY[slug] ?? slug;
 
-  const toggleWishlist = async (productId: string) => {
-    if (!session?.user?.id) {
-      alert("Please login to use wishlist");
-      return;
+  const [products, setProducts]             = useState<any[]>([]);
+  const [total, setTotal]                   = useState(0);
+  const [hasMore, setHasMore]               = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadingMore, setLoadingMore]       = useState(false);
+  const [sortOption, setSortOption]         = useState("newest");
+  const [showInStock, setShowInStock]       = useState(true);
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const [minPrice, setMinPrice]             = useState(0);
+  const [maxPrice, setMaxPrice]             = useState(999999);
+  const [priceInitted, setPriceInitted]     = useState(false);
+  const [filterOpen, setFilterOpen]         = useState(false);
+
+  const loaderRef   = useRef<HTMLDivElement>(null);
+  const pageRef     = useRef(1);
+  const fetchingRef = useRef(false);
+  const seenIds     = useRef(new Set<string>());
+
+  const fetchPage = useCallback(async (pageNum: number, signal?: AbortSignal) => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+    if (pageNum === 1) setInitialLoading(true);
+    else setLoadingMore(true);
+
+    try {
+      const res = await fetch(
+        `/api/products?category=${encodeURIComponent(dbCategory)}&limit=${LIMIT}&page=${pageNum}`,
+        { signal }
+      );
+      if (!res.ok) throw new Error("fetch error");
+      const json = await res.json();
+
+      const items: any[] = Array.isArray(json.products) ? json.products : [];
+      const serverTotal  = typeof json.total === "number" ? json.total : 0;
+      const fresh = items.filter(p => !seenIds.current.has(p.id));
+      fresh.forEach(p => seenIds.current.add(p.id));
+
+      setProducts(prev => pageNum === 1 ? fresh : [...prev, ...fresh]);
+      setTotal(serverTotal);
+      setHasMore(json.hasNextPage ?? false);
+
+      if (pageNum === 1 && fresh.length > 0 && !priceInitted) {
+        const mx = Math.max(...fresh.map((p: any) => Number(p.price) || 0));
+        setMaxPrice(mx);
+        setPriceInitted(true);
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") console.error(e);
+    } finally {
+      fetchingRef.current = false;
+      setInitialLoading(false);
+      setLoadingMore(false);
     }
-    const isWishlisted = wishlist.has(productId);
-    await fetch("/api/wishlist", {
-      method: isWishlisted ? "DELETE" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId }),
-    });
+  }, [dbCategory, priceInitted]);
 
-    setWishlist(prev => {
-      const next = new Set(prev);
-      isWishlisted ? next.delete(productId) : next.add(productId);
-      return next;
+  // ✅ RACE CONDITION FIX (the real bug):
+  // React StrictMode sequence in dev:
+  //   1. Effect 1 runs  → fetchingRef = true, fetch starts (async, not yet resolved)
+  //   2. Cleanup 1 runs → ac.abort() fired, but finally() hasn't run yet!
+  //                       So fetchingRef is STILL true at this moment.
+  //   3. Effect 2 runs  → fetchingRef is true → guard blocks fetch → STUCK ON LOADING FOREVER
+  //
+  // The previous fix (signal?.aborted in finally) skipped setting initialLoading=false
+  // for aborted requests, but the SECOND fetch was still being blocked by the guard.
+  //
+  // Solution: Force fetchingRef = false at the START of cleanup (before abort)
+  // so that when Effect 2 runs, the guard is always clear.
+  useEffect(() => {
+    const ac = new AbortController();
+    fetchingRef.current = false; // ✅ Force clear — in case previous async finally hasn't run
+    seenIds.current.clear();
+    pageRef.current = 1;
+    setProducts([]);
+    setTotal(0);
+    setHasMore(true);
+    setPriceInitted(false);
+    setMinPrice(0);
+    setMaxPrice(999999);
+    setInitialLoading(true);
+    fetchPage(1, ac.signal);
+
+    return () => {
+      fetchingRef.current = false; // ✅ Reset guard BEFORE abort so next mount's fetch isn't blocked
+      ac.abort();
+    };
+  }, [dbCategory]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!hasMore || initialLoading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !fetchingRef.current) {
+          pageRef.current += 1;
+          fetchPage(pageRef.current);
+        }
+      },
+      { rootMargin: "300px" }
+    );
+    const el = loaderRef.current;
+    if (el) observer.observe(el);
+    return () => { if (el) observer.unobserve(el); };
+  }, [hasMore, initialLoading, fetchPage]);
+
+  const displayProducts = useMemo(() => {
+    let result = products.filter(p => {
+      const price   = Number(p.price) || 0;
+      const inStock = p.stockQuantity > 0;
+      return (
+        price >= minPrice && price <= maxPrice &&
+        ((showInStock && inStock) || (showOutOfStock && !inStock))
+      );
     });
+    if (sortOption === "price-low")  result.sort((a, b) => a.price - b.price);
+    if (sortOption === "price-high") result.sort((a, b) => b.price - a.price);
+    if (sortOption === "name-az")    result.sort((a, b) => a.title.localeCompare(b.title));
+    if (sortOption === "discount")   result.sort((a, b) => b.discountPercentage - a.discountPercentage);
+    return result;
+  }, [products, minPrice, maxPrice, showInStock, showOutOfStock, sortOption]);
+
+  const inStockCount    = products.filter(p => p.stockQuantity > 0).length;
+  const outOfStockCount = products.filter(p => p.stockQuantity === 0).length;
+  const hasActiveFilters = !showInStock || showOutOfStock || minPrice > 0;
+
+  const clearFilters = () => {
+    setShowInStock(true);
+    setShowOutOfStock(false);
+    setMinPrice(0);
+    setMaxPrice(Math.max(...products.map(p => Number(p.price) || 0), 999999));
+    setSortOption("newest");
   };
-
-  if (loading) return <div className="flex justify-center py-20">Loading {categoryName}...</div>;
 
   return (
-    <div className="bg-white min-h-screen">
+    <div className="bg-white min-h-screen flex flex-col">
       <Navbar />
+      <main className="flex-1">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
 
-      <div className="max-w-7xl mx-auto px-6 py-10">
-        <h1 className="text-3xl font-light mb-2">{categoryName}</h1>
-        <p className="text-gray-600 mb-8">{filteredProducts.length} products found</p>
-
-        <div className="flex flex-col lg:flex-row gap-10">
-          {/* FILTERS SIDEBAR */}
-          <div className="lg:w-80 flex-shrink-0">
-            <div className="bg-white border border-gray-200 rounded-3xl p-8 sticky top-24">
-              <div className="flex justify-between items-center mb-8">
-                <h2 className="text-xl font-semibold">Filters</h2>
-                {hasActiveFilters && (
-                  <button
-                    onClick={clearAllFilters}
-                    className="text-red-600 hover:text-red-700 text-sm font-medium"
-                  >
-                    Clear All
-                  </button>
-                )}
-              </div>
-
-              {/* Availability */}
-              <div className="mb-10">
-                <h3 className="font-medium mb-4">Availability</h3>
-                <label className="flex items-center gap-3 mb-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showInStock}
-                    onChange={() => setShowInStock(!showInStock)}
-                    className="w-5 h-5 accent-black"
-                  />
-                  <span>In Stock ({inStockCount})</span>
-                </label>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showOutOfStock}
-                    onChange={() => setShowOutOfStock(!showOutOfStock)}
-                    className="w-5 h-5 accent-black"
-                  />
-                  <span>Out of Stock ({outOfStockCount})</span>
-                </label>
-              </div>
-
-              {/* Price Range */}
-              <div>
-                <h3 className="font-medium mb-4">Price Range</h3>
-                <div className="flex gap-4">
-                  <div className="flex-1 min-w-0">
-                    <label className="text-xs text-gray-500 block mb-1">Min Price</label>
-                    <div className="border border-gray-300 rounded-2xl px-5 py-3.5 flex items-center bg-white focus-within:border-black transition">
-                      <span className="text-gray-500 text-base">₹</span>
-                      <input
-                        type="number"
-                        value={minPrice}
-                        onChange={(e) =>
-                          setMinPrice(Math.max(0, Number(e.target.value) || 0))
-                        }
-                        className="w-full bg-transparent focus:outline-none ml-2 text-lg font-medium min-w-0"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <label className="text-xs text-gray-500 block mb-1">Max Price</label>
-                    <div className="border border-gray-300 rounded-2xl px-5 py-3.5 flex items-center bg-white focus-within:border-black transition">
-                      <span className="text-gray-500 text-base">₹</span>
-                      <input
-                        type="number"
-                        value={maxPrice}
-                        onChange={(e) =>
-                          setMaxPrice(Math.max(minPrice, Number(e.target.value) || minPrice))
-                        }
-                        className="w-full bg-transparent focus:outline-none ml-2 text-lg font-medium min-w-0"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="text-center text-sm text-gray-600 mt-5 font-medium">
-                  ₹{minPrice.toLocaleString()} - ₹{maxPrice.toLocaleString()}
-                </div>
-              </div>
-            </div>
+          <div className="mb-6">
+            <h1 className="text-3xl font-light">{dbCategory}</h1>
+            <p className="text-gray-500 text-sm mt-1">
+              {initialLoading
+                ? "Loading…"
+                : `${total.toLocaleString("en-IN")} total  •  ${displayProducts.length} showing${hasMore ? " — scroll for more" : ""}`}
+            </p>
           </div>
 
-          {/* PRODUCTS AREA */}
-          <div className="flex-1">
-            {/* Sorting Dropdown */}
-            <div className="flex justify-end mb-8">
-              <select
-                value={sortOption}
-                onChange={(e) => setSortOption(e.target.value)}
-                className="border border-gray-300 bg-white rounded-2xl px-6 py-3 focus:outline-none focus:border-black"
-              >
-                <option value="newest">Newest First</option>
-                <option value="price-low">Price: Low to High</option>
-                <option value="price-high">Price: High to Low</option>
-                <option value="name-az">Name: A to Z</option>
-              </select>
-            </div>
+          <div className="flex flex-col lg:flex-row gap-8">
 
-            {/* Products Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
-              {currentProducts.map((product: any) => {
-                const isWishlisted = wishlist.has(product.id.toString());
-                return (
-                  <div key={product.id} className="group bg-white border border-gray-100 rounded-3xl overflow-hidden hover:border-gray-300 transition-all">
-                    <Link href={`/product/${product.id}`}>
-                      <div className="relative aspect-square bg-gray-50">
-                        <Image
-                          src={product.images?.[0] || "/placeholder.jpg"}
-                          alt={product.title}
-                          fill
-                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                          className="object-cover group-hover:scale-105 transition-transform duration-700"
-                        />
-                        {product.discountPercentage > 0 && (
-                          <div className="absolute top-4 right-4 bg-red-600 text-white text-xs px-3 py-1 rounded-full">
-                            {product.discountPercentage}% OFF
+            <button
+              onClick={() => setFilterOpen(o => !o)}
+              className="lg:hidden flex items-center gap-2 self-start border border-gray-200 rounded-xl px-4 py-2 text-sm font-medium"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round" />
+              </svg>
+              Filters {hasActiveFilters && <span className="bg-black text-white text-xs rounded-full px-1.5 py-0.5 leading-none">!</span>}
+            </button>
+
+            <aside className={`lg:w-60 flex-shrink-0 ${filterOpen ? "block" : "hidden"} lg:block`}>
+              <div className="bg-white border border-gray-100 rounded-2xl p-5 sticky top-24">
+                <div className="flex justify-between items-center mb-5">
+                  <h2 className="font-semibold">Filters</h2>
+                  {hasActiveFilters && <button onClick={clearFilters} className="text-red-500 text-xs font-medium">Clear all</button>}
+                </div>
+
+                <div className="mb-6">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Availability</p>
+                  <label className="flex items-center gap-2 mb-2 cursor-pointer text-sm">
+                    <input type="checkbox" checked={showInStock} onChange={() => setShowInStock(v => !v)} className="w-4 h-4 accent-black" />
+                    In Stock ({inStockCount})
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm">
+                    <input type="checkbox" checked={showOutOfStock} onChange={() => setShowOutOfStock(v => !v)} className="w-4 h-4 accent-black" />
+                    Out of Stock ({outOfStockCount})
+                  </label>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Price Range</p>
+                  {[
+                    { label: "Min", value: minPrice, onChange: (v: number) => setMinPrice(Math.max(0, v)) },
+                    { label: "Max", value: maxPrice, onChange: (v: number) => setMaxPrice(Math.max(minPrice, v)) },
+                  ].map(({ label, value, onChange }) => (
+                    <div key={label} className="mb-2">
+                      <p className="text-xs text-gray-400 mb-1">{label}</p>
+                      <div className="border border-gray-200 rounded-lg px-3 py-2 flex gap-1 items-center focus-within:border-black">
+                        <span className="text-gray-400 text-xs">₹</span>
+                        <input type="number" value={value} onChange={e => onChange(Number(e.target.value) || 0)} className="flex-1 bg-transparent text-sm focus:outline-none min-w-0" />
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-center text-xs text-gray-400 mt-2">₹{minPrice.toLocaleString("en-IN")} – ₹{maxPrice.toLocaleString("en-IN")}</p>
+                </div>
+              </div>
+            </aside>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-end mb-5">
+                <select value={sortOption} onChange={e => setSortOption(e.target.value)}
+                  className="border border-gray-200 bg-white rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-black">
+                  <option value="newest">Newest First</option>
+                  <option value="price-low">Price: Low → High</option>
+                  <option value="price-high">Price: High → Low</option>
+                  <option value="discount">Biggest Discount</option>
+                  <option value="name-az">Name: A → Z</option>
+                </select>
+              </div>
+
+              {initialLoading ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {Array.from({ length: 12 }).map((_, i) => <ProductSkeleton key={i} />)}
+                </div>
+              ) : displayProducts.length === 0 ? (
+                <div className="text-center py-24 text-gray-400">No products found. Try adjusting your filters.</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {displayProducts.map(product => {
+                      const wishlisted = isWishlisted(product.id);
+                      return (
+                        <div key={product.id} className="group bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-gray-300 hover:shadow-md transition-all duration-200">
+                          <Link href={`/product/${product.id}`}>
+                            <div className="relative aspect-square bg-gray-50">
+                              <Image src={product.images?.[0] || "/placeholder.jpg"} alt={product.title} fill
+                                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                                className="object-cover group-hover:scale-105 transition-transform duration-500" />
+                              {product.discountPercentage > 0 && (
+                                <span className="absolute top-2 right-2 bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">-{product.discountPercentage}%</span>
+                              )}
+                              {product.stockQuantity === 0 && (
+                                <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
+                                  <span className="text-[10px] font-semibold text-gray-500 bg-white px-2 py-0.5 rounded-full border">Out of Stock</span>
+                                </div>
+                              )}
+                            </div>
+                          </Link>
+                          <div className="p-4">
+                            <Link href={`/product/${product.id}`}>
+                              <h3 className="text-sm font-medium line-clamp-2 min-h-[2.6em] hover:underline">{product.title}</h3>
+                            </Link>
+                            <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                              <span className="text-base font-bold">₹{Number(product.price).toLocaleString("en-IN")}</span>
+                              {product.compareAtPrice && (
+                                <span className="text-xs text-gray-400 line-through">₹{Number(product.compareAtPrice).toLocaleString("en-IN")}</span>
+                              )}
+                            </div>
+                            <div className="mt-3 flex justify-between items-center">
+                              <button onClick={() => toggleWishlist(product.id)}
+                                className={`text-xl transition-colors ${wishlisted ? "text-red-500" : "text-gray-300 hover:text-gray-400"}`}
+                                aria-label={wishlisted ? "Remove from wishlist" : "Add to wishlist"}>
+                                {wishlisted ? "♥" : "♡"}
+                              </button>
+                              <Link href={`/product/${product.id}`} className="text-xs font-semibold underline hover:text-gray-600">View Details</Link>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    </Link>
-
-                    <div className="p-6">
-                      <Link href={`/product/${product.id}`} className="block hover:underline">
-                        <h3 className="font-medium line-clamp-2 min-h-[2.8em]">{product.title}</h3>
-                      </Link>
-
-                      <div className="mt-4 flex items-baseline gap-2">
-                        <span className="text-2xl font-semibold">₹{product.price}</span>
-                        {product.compareAtPrice && (
-                          <span className="text-sm text-gray-400 line-through">₹{product.compareAtPrice}</span>
-                        )}
-                      </div>
-
-                      <div className="mt-6 flex justify-between items-center">
-                        <button
-                          onClick={() => toggleWishlist(product.id.toString())}
-                          className={`text-3xl transition ${isWishlisted ? "text-red-500" : "text-gray-300 hover:text-gray-400"}`}
-                        >
-                          {isWishlisted ? "♥" : "♡"}
-                        </button>
-                        <Link href={`/product/${product.id}`} className="text-sm font-medium text-black underline hover:text-gray-700">
-                          View Details →
-                        </Link>
-                      </div>
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex justify-center gap-4 mt-16">
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="px-8 py-3 border border-gray-300 rounded-2xl disabled:opacity-50 hover:bg-gray-100"
-                >
-                  Previous
-                </button>
-                <span className="px-8 py-3 text-sm">Page {currentPage} of {totalPages}</span>
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="px-8 py-3 border border-gray-300 rounded-2xl disabled:opacity-50 hover:bg-gray-100"
-                >
-                  Next
-                </button>
-              </div>
-            )}
+                  {loadingMore && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4">
+                      {Array.from({ length: 4 }).map((_, i) => <ProductSkeleton key={i} />)}
+                    </div>
+                  )}
+                  {hasMore && <div ref={loaderRef} className="h-10 mt-4" aria-hidden />}
+                  {!hasMore && (
+                    <p className="text-center text-gray-400 text-sm py-10">All {total.toLocaleString("en-IN")} products loaded ✓</p>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* Footer */}
-      <footer className="bg-black text-white py-16 mt-20">
-        <div className="max-w-7xl mx-auto px-6 text-center">
-          <p className="text-gray-400">© 2026 Zafy Fashion. All rights reserved.</p>
-          <p className="text-sm text-gray-500 mt-2">Premium Fashion • Fast Shipping • Secure Payments</p>
-        </div>
-      </footer>
+      </main>
+      <WhatsappButton />
+      <Footer />
     </div>
   );
 }

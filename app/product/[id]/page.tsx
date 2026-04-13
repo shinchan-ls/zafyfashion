@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import WhatsappButton from "@/components/WhatsappButton";
 
 interface Product {
   id: string;
@@ -250,13 +252,8 @@ export default function ProductDetail() {
         </div>
       </div>
 
-      {/* Footer */}
-      <footer className="bg-black text-white py-16 mt-20">
-        <div className="max-w-7xl mx-auto px-6 text-center">
-          <p className="text-gray-400">© 2026 Zafy Fashion. All rights reserved.</p>
-          <p className="text-sm text-gray-500 mt-2">Premium Fashion • Fast Shipping • Secure Payments</p>
-        </div>
-      </footer>
+      <WhatsappButton />
+      <Footer />
     </div>
   );
 }

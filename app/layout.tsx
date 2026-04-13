@@ -1,8 +1,9 @@
-// app/layout.tsx  (Updated - Razorpay script removed from here)
+// app/layout.tsx
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Providers from "./providers";
 import "./globals.css";
+import { WishlistProvider } from "@/app/context/WishlistContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,7 +31,9 @@ export default function RootLayout({
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-white">
         <Providers>
-          {children}
+          <WishlistProvider>
+            {children}
+          </WishlistProvider>
         </Providers>
       </body>
     </html>

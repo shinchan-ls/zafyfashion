@@ -1,16 +1,16 @@
-// components/Navbar.tsx
+// app/components/Navbar.tsx
 "use client";
 
 import Link from "next/link";
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { ShoppingCart, User, Search, Menu, X, Heart } from "lucide-react";
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import AuthModal from "@/components/AuthModal";   // ← New Component
+import AuthModal from "@/components/AuthModal";
 
 export default function Navbar() {
-  const { data: session, status } = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
 
   const [cartCount, setCartCount] = useState(0);
@@ -19,7 +19,6 @@ export default function Navbar() {
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Cart Count Logic (Backend wala same rakha)
   useEffect(() => {
     const updateCartCount = () => {
       const cart = JSON.parse(localStorage.getItem("cart") || "[]");
@@ -46,31 +45,37 @@ export default function Navbar() {
   };
 
   const handleUserClick = () => {
-    if (session) {
-      router.push("/account");
-    } else {
-      setShowAuthModal(true);
-    }
+    if (session) router.push("/account");
+    else setShowAuthModal(true);
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-white border-b">
-      {/* Main Navbar */}
-      <nav className="max-w-7xl mx-auto px-6 py-5">
+    <header className="sticky top-0 z-50 bg-white border-b shadow-sm">
+      <nav className="max-w-7xl mx-auto px-4 md:px-6 py-4">
         <div className="flex items-center justify-between">
-          {/* Logo */}
-          <Link href="/">
+
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="md:hidden text-2xl"
+          >
+            {mobileOpen ? <X size={28} /> : <Menu size={28} />}
+          </button>
+
+          {/* Logo - Milano Size & Style */}
+          <Link href="/" className="flex-shrink-0">
             <Image
-              src="/logo/logo.png"
-              alt="Zafy Logo"
-              width={140}
-              height={50}
-              className="w-[100px] md:w-[140px] h-auto object-contain"
+              src="/logo/logo-old.png"
+              alt="Zafy Fashion Hub"
+              width={260}
+              height={52}
+              className="h-[52px] w-auto object-contain"
+              priority
             />
           </Link>
 
-          {/* Desktop Menu */}
-          <div className="hidden md:flex items-center gap-8 text-base font-medium">
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center gap-8 text-sm font-medium tracking-wide">
             <Link href="/category/watches" className="hover:text-black transition">Watch</Link>
             <Link href="/category/perfumes" className="hover:text-black transition">Perfumes</Link>
             <Link href="/category/wallets" className="hover:text-black transition">Wallets</Link>
@@ -79,96 +84,82 @@ export default function Navbar() {
             <Link href="/category/shoes" className="hover:text-black transition">Shoes</Link>
           </div>
 
-          {/* Right Side */}
-          <div className="flex items-center gap-5">
+          {/* Right Side Icons */}
+          <div className="flex items-center gap-5 md:gap-6">
+
             {/* Desktop Search */}
-            <div className="hidden md:block relative w-72">
-              <form onSubmit={handleSearchSubmit}>
-                <div className="relative">
-                  <Search size={18} className="absolute left-4 top-3.5 text-gray-500" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="I'm looking for..."
-                    className="w-full bg-gray-100 pl-11 pr-5 py-3 rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-black"
-                  />
-                </div>
+            <div className="hidden md:block w-72">
+              <form onSubmit={handleSearchSubmit} className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="I'm looking for..."
+                  className="w-full bg-gray-100 pl-11 pr-4 py-2.5 rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                />
               </form>
             </div>
 
-            {/* Mobile Search Button */}
-            <button onClick={() => setShowMobileSearch(!showMobileSearch)} className="md:hidden p-2">
+            {/* Mobile Search Icon */}
+            <button onClick={() => setShowMobileSearch(!showMobileSearch)} className="md:hidden">
               <Search size={24} />
             </button>
 
             {/* Wishlist */}
-            <Link href="/account/wishlist" className="relative p-2 hover:text-black transition">
+            <Link href="/account/wishlist" className="hidden md:block">
               <Heart size={24} />
             </Link>
 
-            {/* User Icon - Main Change */}
-            <button
-              onClick={handleUserClick}
-              className="p-2 hover:text-black transition"
-              aria-label="Account"
-            >
+            {/* Account */}
+            <button onClick={handleUserClick}>
               <User size={24} />
             </button>
 
             {/* Cart */}
-            <Link href="/cart" className="relative p-2 hover:text-black transition">
+            <Link href="/cart" className="relative">
               <ShoppingCart size={24} />
               {cartCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-medium w-5 h-5 rounded-full flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-medium w-5 h-5 flex items-center justify-center rounded-full">
                   {cartCount}
                 </span>
               )}
             </Link>
-
-            {/* Mobile Menu Button */}
-            <button onClick={() => setMobileOpen(!mobileOpen)} className="md:hidden p-2">
-              {mobileOpen ? <X size={28} /> : <Menu size={28} />}
-            </button>
           </div>
         </div>
 
-        {/* Mobile Search */}
+        {/* Mobile Search Bar */}
         {showMobileSearch && (
-          <div className="md:hidden mt-4 px-2 pb-4">
+          <div className="md:hidden mt-4">
             <form onSubmit={handleSearchSubmit}>
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search products..."
-                className="w-full bg-gray-100 px-5 py-3 rounded-full text-sm focus:outline-none"
+                placeholder="I'm looking for..."
+                className="w-full bg-gray-100 px-4 py-3 rounded-full text-sm"
                 autoFocus
               />
             </form>
           </div>
         )}
+
+        {/* Mobile Menu */}
+        {mobileOpen && (
+          <div className="md:hidden mt-6 border-t pt-6">
+            <div className="flex flex-col gap-6 text-base font-medium">
+              <Link href="/category/watches">Watch</Link>
+              <Link href="/category/perfumes">Perfumes</Link>
+              <Link href="/category/wallets">Wallets</Link>
+              <Link href="/category/sunglasses">Goggles</Link>
+              <Link href="/category/belts">Belts</Link>
+              <Link href="/category/shoes">Shoes</Link>
+            </div>
+          </div>
+        )}
       </nav>
 
-      {/* Mobile Menu */}
-      {mobileOpen && (
-        <div className="md:hidden bg-white border-t px-6 py-8">
-          <div className="flex flex-col gap-6 text-lg font-medium">
-            <Link href="/category/watches" onClick={() => setMobileOpen(false)}>Watch</Link>
-            <Link href="/category/perfumes" onClick={() => setMobileOpen(false)}>Perfumes</Link>
-            <Link href="/category/wallets" onClick={() => setMobileOpen(false)}>Wallets</Link>
-            <Link href="/category/sunglasses" onClick={() => setMobileOpen(false)}>Goggles</Link>
-            <Link href="/category/belts" onClick={() => setMobileOpen(false)}>Belts</Link>
-            <Link href="/category/shoes" onClick={() => setMobileOpen(false)}>Shoes</Link>
-          </div>
-        </div>
-      )}
-
-      {/* Auth Modal */}
-      <AuthModal 
-        isOpen={showAuthModal} 
-        onClose={() => setShowAuthModal(false)} 
-      />
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </header>
   );
 }

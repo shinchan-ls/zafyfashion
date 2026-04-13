@@ -1,6 +1,8 @@
+// app/api/checkout/create/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/app/api/auth/[...nextauth]/route";
+import { checkCheckoutRateLimit } from "@/lib/ratelimit";
 
 interface CartItem {
   id: string | number;
@@ -10,12 +12,14 @@ interface CartItem {
 }
 
 export async function POST(req: NextRequest) {
-  console.log("🔵 [CHECKOUT] API called");
-
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Please login" }, { status: 401 });
   }
+
+  // Rate limit: 3 checkout attempts per minute per user
+  const rateLimited = await checkCheckoutRateLimit(req, session.user.id);
+  if (rateLimited) return rateLimited;
 
   const { cartItems, shippingAddress, paymentMethod = "COD" } = await req.json();
 
@@ -24,40 +28,46 @@ export async function POST(req: NextRequest) {
   }
 
   if (
+    !shippingAddress?.name ||
     !shippingAddress?.phone ||
     !shippingAddress?.address ||
     !shippingAddress?.city ||
     !shippingAddress?.state ||
     !shippingAddress?.pincode
   ) {
-    return NextResponse.json(
-      { error: "Complete shipping address required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Complete shipping address is required" }, { status: 400 });
+  }
+
+  if (!/^\d{6}$/.test(shippingAddress.pincode)) {
+    return NextResponse.json({ error: "Invalid pincode. Must be exactly 6 digits." }, { status: 400 });
+  }
+
+  if (!/^\d{10}$/.test(shippingAddress.phone)) {
+    return NextResponse.json({ error: "Invalid phone number. Must be exactly 10 digits." }, { status: 400 });
   }
 
   try {
     const totalAmount = cartItems.reduce(
-      (sum: number, item: CartItem) =>
-        sum + Number(item.price) * Number(item.quantity),
+      (sum: number, item: CartItem) => sum + Number(item.price) * Number(item.quantity),
       0
     );
 
-    // ✅ STOCK CHECK ONLY
+    // ── Stock check (read-only, fast fail before creating anything) ───────────
     for (const item of cartItems) {
       const product = await prisma.product.findUnique({
         where: { id: BigInt(item.id) },
       });
-
       if (!product || product.stockQuantity < item.quantity) {
         return NextResponse.json(
-          { error: `${product?.title || "Item"} is out of stock` },
+          { error: `"${product?.title || "Item"}" is out of stock or insufficient quantity` },
           { status: 400 }
         );
       }
     }
 
-    // ✅ CREATE ORDER
+    const isCOD = paymentMethod === "COD";
+
+    // ── Create order ───────────────────────────────────────────────────────────
     const order = await prisma.order.create({
       data: {
         userId: parseInt(session.user.id),
@@ -66,11 +76,9 @@ export async function POST(req: NextRequest) {
         finalAmount: totalAmount,
         paymentMethod,
         paymentStatus: "PENDING",
-        status: paymentMethod === "COD" ? "Confirmed" : "Pending",
+        status: isCOD ? "Confirmed" : "Pending",
 
-        customerName:
-          `${shippingAddress.firstName || ""} ${shippingAddress.lastName || ""}`.trim() ||
-          "Customer",
+        customerName: shippingAddress.name || "Customer",
         customerPhone: shippingAddress.phone,
         customerEmail: session.user.email || "",
 
@@ -91,151 +99,121 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    console.log(`✅ Order created: ${order.orderNumber}`);
-
-    // =========================================
-    // 🔥 COD FLOW
-    // =========================================
-    if (paymentMethod === "COD") {
-      try {
-        console.log("🚀 COD Order processing...");
-
-        const orderItems = await prisma.orderItem.findMany({
-          where: { orderId: order.id },
-        });
-
-        // ✅ Reduce stock
-        for (const item of orderItems) {
-          await prisma.product.update({
-            where: { id: item.productId },
-            data: {
-              stockQuantity: {
-                decrement: item.quantity,
-              },
-            },
-          });
-        }
-
-        // ===============================
-        // 🔥 FULL DEBUG SELLOSHIP
-        // ===============================
-
-        console.log("========== SELLOSHIP DEBUG START ==========");
-
-        console.log("🔑 API KEY:", process.env.SELLOSHIP_API_KEY ? "EXISTS" : "MISSING");
-        console.log("🏢 VENDOR ID:", process.env.SELLOSHIP_VENDOR_ID);
-
-        console.log("🧾 Order:", {
-          orderNumber: order.orderNumber,
-          totalAmount: order.totalAmount,
-          name: order.customerName,
-          phone: order.customerPhone,
-          email: order.customerEmail,
-        });
-
-        console.log("🛒 Items:", orderItems);
-
-        const formData = new FormData();
-
-        const vendorId = process.env.SELLOSHIP_VENDOR_ID || "65518";
-        formData.append("vendor_id", vendorId);
-        formData.append("device_from", "4");
-
-        const productName =
-          orderItems.map(i => i.title).join(", ").slice(0, 200) || "Order Items";
-        formData.append("product_name", productName);
-
-        formData.append("price", order.totalAmount.toString());
-        formData.append("old_price", order.totalAmount.toString());
-
-        const fullName = order.customerName || "Customer User";
-        const [firstName, ...rest] = fullName.split(" ");
-        const lastName = rest.join(" ") || "User";
-
-        formData.append("first_name", firstName);
-        formData.append("last_name", lastName);
-
-        formData.append("mobile_no", order.customerPhone);
-        formData.append("email", order.customerEmail || "test@gmail.com");
-
-        formData.append("address", order.shippingAddress);
-        formData.append("state", order.state);
-        formData.append("city", order.city);
-        formData.append("zip_code", order.pincode);
-
-        formData.append("landmark", "Near Main Road");
-
-        formData.append("payment_method", "3");
-
-        const totalQty = orderItems.reduce((sum, i) => sum + i.quantity, 0);
-        formData.append("qty", totalQty.toString());
-
-        formData.append("custom_order_id", order.orderNumber);
-
-        console.log("📤 FINAL FORMDATA:");
-        for (const pair of formData.entries()) {
-          console.log(pair[0] + ": " + pair[1]);
-        }
-
-        const res = await fetch("https://selloship.com/web_api/Create_order", {
-          method: "POST",
-          headers: {
-            Authorization: process.env.SELLOSHIP_API_KEY!,
-          },
-          body: formData,
-        });
-
-        console.log("📡 HTTP STATUS:", res.status);
-
-        const text = await res.text();
-        console.log("📦 RAW RESPONSE:", text);
-
-        let data: any = {};
-        try {
-          data = JSON.parse(text);
-        } catch {
-          console.log("❌ JSON PARSE FAILED");
-        }
-
-        console.log("📦 PARSED:", data);
-
-        const selloshipOrderId =
-          data?.order_id ||
-          data?.data?.order_id ||
-          data?.selloship_order_id;
-
-        console.log("🆔 ORDER ID:", selloshipOrderId);
-
-        if (selloshipOrderId) {
-          await prisma.order.update({
-            where: { id: order.id },
-            data: {
-              selloshipOrderId: selloshipOrderId.toString(),
-            },
-          });
-
-          console.log("✅ SAVED IN DB");
-        } else {
-          console.log("❌ FAILED:", data?.msg);
-        }
-
-        console.log("========== SELLOSHIP DEBUG END ==========");
-
-      } catch (err) {
-        console.error("❌ COD ERROR:", err);
+    // ── COD: deduct stock atomically + push to Selloship ──────────────────────
+    if (isCOD) {
+      const stockOk = await deductStockSafe(order.id);
+      if (!stockOk) {
+        // Another user grabbed the last item between our check and now
+        // Roll back by deleting the order we just created
+        await prisma.order.delete({ where: { id: order.id } });
+        return NextResponse.json(
+          { error: "One or more items just went out of stock. Please review your cart." },
+          { status: 409 }
+        );
       }
-    }
 
-    return NextResponse.json({
-      success: true,
-      orderNumber: order.orderNumber,
-    });
+      pushToSelloship(order).catch((err) =>
+        console.error("Selloship async error (COD):", err)
+      );
+    }
+    // Razorpay: stock deducted ONLY after payment.captured (in verify + webhook)
+
+    return NextResponse.json({ success: true, orderNumber: order.orderNumber });
 
   } catch (error: any) {
-    console.error("💥 Checkout Error:", error);
-    return NextResponse.json(
-      { error: error.message || "Failed to place order" },
-      { status: 500 }
+    console.error("Checkout Error:", error);
+    return NextResponse.json({ error: error.message || "Failed to place order" }, { status: 500 });
+  }
+}
+
+// ─── Race-condition-proof stock deduction ────────────────────────────────────
+// Uses updateMany with WHERE stockQuantity >= quantity.
+// If two requests run simultaneously, only one will match — the other gets count=0.
+// Returns false if ANY item couldn't be deducted (triggers order rollback for COD).
+export async function deductStockSafe(orderId: number): Promise<boolean> {
+  const orderItems = await prisma.orderItem.findMany({ where: { orderId } });
+
+  for (const item of orderItems) {
+    const result = await prisma.product.updateMany({
+      where: {
+        id: item.productId,
+        stockQuantity: { gte: item.quantity }, // atomic guard — this is the key line
+      },
+      data: { stockQuantity: { decrement: item.quantity } },
+    });
+
+    if (result.count === 0) {
+      // This item lost the race — stock hit 0 between check and deduction
+      console.error(`Stock race lost: product ${item.productId}, order ${orderId}`);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// ─── Selloship integration ────────────────────────────────────────────────────
+export async function pushToSelloship(order: any): Promise<void> {
+  try {
+    if (order.selloshipOrderId) return; // idempotent
+
+    const orderItems = await prisma.orderItem.findMany({ where: { orderId: order.id } });
+
+    const formData = new FormData();
+    formData.append("vendor_id", process.env.SELLOSHIP_VENDOR_ID!);
+    formData.append("device_from", "4");
+
+    const productName =
+      orderItems
+        .map((item: { title: string }) => item.title)
+        .join(", ")
+        .slice(0, 200) || "Multiple Items"; formData.append("product_name", productName);
+    formData.append("price", order.totalAmount.toString());
+    formData.append("old_price", order.totalAmount.toString());
+
+    const fullName = order.customerName || "Customer User";
+    const [firstName, ...rest] = fullName.split(" ");
+    formData.append("first_name", firstName);
+    formData.append("last_name", rest.join(" ") || "User");
+
+    formData.append("mobile_no", order.customerPhone);
+    formData.append("email", order.customerEmail || "zafyfashionhub@gmail.com");
+    formData.append("address", order.shippingAddress);
+    formData.append("state", order.state);
+    formData.append("city", order.city);
+    formData.append("zip_code", order.pincode);
+    formData.append("landmark", "Near Main Road");
+    formData.append("payment_method", order.paymentMethod === "COD" ? "3" : "1");
+
+    const totalQty = orderItems.reduce(
+      (sum: number, item: { quantity: number }) => sum + item.quantity,
+      0
     );
+    formData.append("qty", totalQty.toString());
+    formData.append("custom_order_id", order.orderNumber);
+
+    const res = await fetch("https://selloship.com/web_api/Create_order", {
+      method: "POST",
+      headers: { Authorization: process.env.SELLOSHIP_API_KEY! },
+      body: formData,
+    });
+
+    const text = await res.text();
+    let data: any = {};
+    try { data = JSON.parse(text); } catch { }
+
+    const selloshipId = data.selloship_order_id || data.order_id;
+    if (selloshipId) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { selloshipOrderId: selloshipId.toString() },
+      });
+      console.log("Selloship linked:", selloshipId);
+    } else {
+      throw new Error(data.msg || "Invalid Selloship response");
+    }
+  } catch (err) {
+    console.error("Selloship failed for order:", order.id, err);
+    // Never re-throw — order must not fail because of Selloship
   }
 }

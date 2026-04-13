@@ -1,88 +1,104 @@
+// app/api/payment/verify/route.ts
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import crypto from "crypto";
+import { pushToSelloship } from "@/app/api/checkout/create/route";
+import { checkRateLimit } from "@/lib/ratelimit";
+import { NextRequest } from "next/server";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // Rate limit: 10 verify attempts per minute per IP
+    const rateLimited = await checkRateLimit(req);
+    if (rateLimited) return rateLimited;
 
+    const body = await req.json();
     const {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
-      orderNumber,
     } = body;
 
-    // 🔒 Signature verification
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return NextResponse.json({ error: "Missing payment fields" }, { status: 400 });
+    }
+
+    // ── Signature verification (HMAC-SHA256) ────────────────────────────────────
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    if (expectedSignature !== razorpay_signature) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+    // timingSafeEqual prevents timing-based attacks
+    const signaturesMatch = crypto.timingSafeEqual(
+      Buffer.from(expectedSignature, "hex"),
+      Buffer.from(razorpay_signature,  "hex")
+    );
+
+    if (!signaturesMatch) {
+      console.error("Signature mismatch");
+      return NextResponse.json({ error: "Invalid payment signature" }, { status: 400 });
     }
 
-    // 🔒 Fetch order
-    const existingOrder = await prisma.order.findUnique({
-      where: { orderNumber },
+    // ── Find order by razorpayOrderId — never trust orderNumber from frontend ───
+    const order = await prisma.order.findUnique({
+      where: { razorpayOrderId: razorpay_order_id },
     });
 
-    if (!existingOrder) {
+    if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    // 🔁 Prevent duplicate processing
-    if (existingOrder.paymentStatus === "PAID") {
+    // ── Idempotency: webhook may have already processed this ────────────────────
+    if (order.paymentStatus === "PAID") {
+      console.log("Already paid (webhook ran first):", order.orderNumber);
       return NextResponse.json({ success: true });
     }
 
-    // ✅ Mark as PAID
-    const order = await prisma.order.update({
-      where: { orderNumber },
-      data: {
-        paymentStatus: "PAID",
-        status: "Confirmed",
-      },
-    });
-
-    // 🚀 SELLOSHIP CALL (ONLY HERE)
-    try {
-      const formData = new FormData();
-
-      formData.append("vendor_id", process.env.SELLOSHIP_VENDOR_ID!);
-      formData.append("device_from", "4");
-      formData.append("product_name", "Order Items");
-      formData.append("price", order.totalAmount.toString());
-      formData.append("first_name", order.customerName);
-      formData.append("mobile_no", order.customerPhone);
-      formData.append("address", order.shippingAddress);
-      formData.append("state", order.state);
-      formData.append("city", order.city);
-      formData.append("zip_code", order.pincode);
-      formData.append("payment_method", "1"); // prepaid
-      formData.append("qty", "1");
-      formData.append("custom_order_id", order.orderNumber);
-
-      const res = await fetch("https://selloship.com/web_api/Create_order", {
-        method: "POST",
-        headers: {
-          Authorization: process.env.SELLOSHIP_API_KEY!,
+    // ── Atomic transaction: mark paid + race-condition-proof stock deduction ────
+    const updatedOrder = await prisma.$transaction(async (tx: typeof prisma) => {
+      const updated = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: "PAID",
+          status: "Confirmed",
+          razorpayPaymentId: razorpay_payment_id,
         },
-        body: formData,
       });
 
-      const data = await res.json();
+      const orderItems = await tx.orderItem.findMany({
+        where: { orderId: order.id },
+      });
 
-      if (data?.order_id) {
-        await prisma.order.update({
-          where: { id: order.id },
-          data: { selloshipOrderId: data.order_id.toString() },
+      for (const item of orderItems) {
+        // RACE-CONDITION FIX:
+        // updateMany with WHERE stockQuantity >= quantity
+        // Two simultaneous transactions: only ONE will match the WHERE clause.
+        // The other gets count=0 — stock can never go below 0.
+        const result = await tx.product.updateMany({
+          where: {
+            id: item.productId,
+            stockQuantity: { gte: item.quantity },
+          },
+          data: { stockQuantity: { decrement: item.quantity } },
         });
+
+        if (result.count === 0) {
+          // Payment is real — log for manual fulfilment, don't throw
+          console.error(
+            `Insufficient stock: product ${item.productId}, order ${order.orderNumber} — manual review needed`
+          );
+        }
       }
-    } catch (err) {
-      console.error("Selloship error:", err);
-    }
+
+      return updated;
+    });
+
+    console.log(`Payment verified: ${updatedOrder.orderNumber}`);
+
+    pushToSelloship(updatedOrder).catch((err) =>
+      console.error("Selloship async error (verify):", err)
+    );
 
     return NextResponse.json({ success: true });
 

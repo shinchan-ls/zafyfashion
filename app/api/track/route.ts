@@ -16,14 +16,19 @@ export async function GET(req: NextRequest) {
             );
         }
 
-        // ✅ 1. GET ORDER
+        // ✅ 1. GET ORDER WITH PRODUCT IMAGES
         const order = await prisma.order.findUnique({
             where: { orderNumber },
             include: {
                 items: {
                     include: {
                         product: {
-                            select: { id: true, title: true, images: true, price: true },
+                            select: { 
+                                id: true, 
+                                title: true, 
+                                images: true, 
+                                price: true 
+                            },
                         },
                     },
                 },
@@ -37,40 +42,56 @@ export async function GET(req: NextRequest) {
             );
         }
 
-        // ✅ 2. CLEAN ITEMS
-        const cleanedItems = order.items.map((item) => {
-            let images: string[] = [];
-            const raw = item.product?.images;
+        // ✅ 2. CLEAN ITEMS WITH STRONG IMAGE HANDLING (Only change here)
+        const cleanedItems = order.items.map((item: any) => {
+            let images: string[] = ["/placeholder.png"];
 
-            if (typeof raw === "string") {
-                try {
-                    images = JSON.parse(raw);
-                } catch {
-                    images = [raw];
+            // Priority 1: From joined product (best case)
+            if (item.product?.images) {
+                if (Array.isArray(item.product.images)) {
+                    if (item.product.images.length > 0) {
+                        images = item.product.images;
+                    }
+                } else if (typeof item.product.images === "string") {
+                    try {
+                        const parsed = JSON.parse(item.product.images);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            images = parsed;
+                        }
+                    } catch {
+                        images = [item.product.images];
+                    }
                 }
             }
-
-            if (!Array.isArray(images) || images.length === 0) {
-                images = ["/placeholder.png"];
+            // Priority 2: Direct from order item (fallback)
+            else if (item.images) {
+                if (Array.isArray(item.images) && item.images.length > 0) {
+                    images = item.images;
+                } else if (typeof item.images === "string") {
+                    images = [item.images];
+                }
             }
 
             return {
                 ...item,
                 product: item.product
-                    ? { ...item.product, images }
+                    ? { 
+                        ...item.product, 
+                        images 
+                      }
                     : {
                         id: "0",
-                        title: item.title,
-                        images: ["/placeholder.png"],
+                        title: item.title || "Product",
+                        images,
                         price: item.price,
-                    },
+                      },
             };
         });
 
         const selloshipOrderId = order.selloshipOrderId;
         let trackingId = order.selloshipTrackingId || order.selloshipAwbNumber;
 
-        // 🟡 STEP 3: FETCH TRACKING ID IF MISSING
+        // 🟡 STEP 3: FETCH TRACKING ID IF MISSING (your original code - unchanged)
         if (!trackingId && selloshipOrderId) {
             try {
                 const formData = new FormData();
@@ -93,7 +114,6 @@ export async function GET(req: NextRequest) {
                 const d = data?.data?.[0];
 
                 if (d) {
-                    // 🔥 UPDATE ORDER MAIN FIELDS
                     await prisma.order.update({
                         where: { id: order.id },
                         data: {
@@ -103,7 +123,7 @@ export async function GET(req: NextRequest) {
                         },
                     });
 
-                    // 🔥 CREATE TRACKING EVENTS (TIMELINE)
+                    // 🔥 CREATE TRACKING EVENTS
                     const events = [];
 
                     if (d.order_created_date && d.order_created_date !== "0000-00-00 00:00:00") {
@@ -146,7 +166,6 @@ export async function GET(req: NextRequest) {
                         });
                     }
 
-                    // 🔥 SAVE EVENTS (NO DUPLICATES)
                     for (const event of events) {
                         await prisma.orderTrackingEvent.upsert({
                             where: {
@@ -165,6 +184,7 @@ export async function GET(req: NextRequest) {
                         });
                     }
                 }
+
                 if (d?.tracking_id) {
                     trackingId = d.tracking_id;
 
@@ -199,7 +219,7 @@ export async function GET(req: NextRequest) {
             );
         }
 
-        // 🔵 STEP 4: LIVE TRACKING
+        // 🔵 STEP 4: LIVE TRACKING (your original code - unchanged)
         const formData = new FormData();
         formData.append("vendor_id", process.env.SELLOSHIP_VENDOR_ID || "65518");
         formData.append("device_from", "4");

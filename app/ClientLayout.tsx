@@ -3,6 +3,7 @@
 import { SessionProvider } from "next-auth/react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import WhatsappButton from "@/components/WhatsappButton";
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -12,6 +13,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         {children}
       </main>
       <Footer />
+      <WhatsappButton />
     </SessionProvider>
   );
 }

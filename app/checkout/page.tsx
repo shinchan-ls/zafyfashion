@@ -3,15 +3,24 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import WhatsappButton from "@/components/WhatsappButton";
 
 declare global {
   interface Window {
     Razorpay: any;
-    __rzp_opened?: boolean;
   }
 }
+
+type PaymentState =
+  | "idle"
+  | "creating_order"
+  | "awaiting_payment"
+  | "verifying"
+  | "success"
+  | "failed";
 
 export default function CheckoutPage() {
   const { data: session } = useSession();
@@ -21,189 +30,201 @@ export default function CheckoutPage() {
   const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"COD" | "RAZORPAY">("COD");
+  const [paymentState, setPaymentState] = useState<PaymentState>("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [newAddress, setNewAddress] = useState({
-    name: "",
-    phone: "",
-    address: "",
-    city: "",
-    state: "",
-    pincode: "",
-    landmark: "",
-  });
+  const rzpInstanceRef = useRef<any>(null);
+  const rzpScriptLoaded = useRef(false);
+  const activeOrderNumber = useRef<string | null>(null);
 
-  const [useNewAddress, setUseNewAddress] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [razorpayScriptLoaded, setRazorpayScriptLoaded] = useState(false);
-
-  // Load Cart
   useEffect(() => {
     const savedCart = JSON.parse(localStorage.getItem("cart") || "[]");
     setCart(savedCart);
   }, []);
 
-  // Load Saved Addresses
   useEffect(() => {
     if (!session?.user?.id) return;
-
     fetch("/api/user/addresses")
-      .then(res => res.json())
-      .then(data => {
+      .then((r) => r.json())
+      .then((data) => {
         const addresses = Array.isArray(data) ? data : [];
         setSavedAddresses(addresses);
-
         if (addresses.length > 0) {
-          const defaultAddr = addresses.find((a: any) => a.isDefault);
-          setSelectedAddressId(defaultAddr ? defaultAddr.id.toString() : addresses[0].id.toString());
-        } else {
-          setUseNewAddress(true);
+          const def = addresses.find((a: any) => a.isDefault);
+          setSelectedAddressId(def ? def.id.toString() : addresses[0].id.toString());
         }
       })
-      .catch(() => setUseNewAddress(true));
+      .catch(console.error);
   }, [session]);
 
-  // Dynamically load Razorpay only when needed
-  const loadRazorpay = () => {
-    return new Promise<void>((resolve, reject) => {
-      if (window.Razorpay) {
-        setRazorpayScriptLoaded(true);
-        return resolve();
-      }
-
+  const ensureRazorpayScript = useCallback((): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (rzpScriptLoaded.current && window.Razorpay) return resolve();
+      document.querySelectorAll('script[src*="checkout.razorpay.com"]').forEach((el) => el.remove());
       const script = document.createElement("script");
       script.src = "https://checkout.razorpay.com/v1/checkout.js";
       script.async = true;
-      script.onload = () => {
-        setRazorpayScriptLoaded(true);
-        resolve();
-      };
-      script.onerror = () => reject(new Error("Failed to load Razorpay"));
+      script.onload = () => { rzpScriptLoaded.current = true; resolve(); };
+      script.onerror = () => reject(new Error("Razorpay script failed to load"));
       document.body.appendChild(script);
     });
-  };
+  }, []);
 
-  const subtotal = cart.reduce(
-    (sum, item) => sum + Number(item.price) * Number(item.quantity),
-    0
-  );
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setNewAddress({ ...newAddress, [e.target.name]: e.target.value });
-  };
-
-  const processOrder = async () => {
-    if (loading || cart.length === 0) return;
-    setLoading(true);
-
-    let finalShipping = useNewAddress
-      ? newAddress
-      : savedAddresses.find(a => a.id.toString() === selectedAddressId);
-
-    if (!finalShipping) {
-      alert("Please select or add a shipping address");
-      setLoading(false);
-      return;
+  const destroyRzp = useCallback(() => {
+    if (rzpInstanceRef.current) {
+      try { rzpInstanceRef.current.close(); } catch (_) {}
+      rzpInstanceRef.current = null;
     }
+    document.querySelectorAll('iframe[src*="razorpay"]').forEach((el) => el.remove());
+    document.querySelectorAll(".razorpay-backdrop").forEach((el) => el.remove());
+  }, []);
+
+  useEffect(() => () => destroyRzp(), [destroyRzp]);
+
+  const subtotal = cart.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0);
+
+  const isLoading =
+    paymentState === "creating_order" ||
+    paymentState === "awaiting_payment" ||
+    paymentState === "verifying";
+
+  const canCheckout = !isLoading && cart.length > 0 && !!selectedAddressId && paymentState !== "success";
+
+  const createOrder = useCallback(async (): Promise<string | null> => {
+    const finalShipping = savedAddresses.find((a) => a.id.toString() === selectedAddressId);
+    if (!finalShipping) { setErrorMsg("Selected address not found"); return null; }
+
+    setPaymentState("creating_order");
+    setErrorMsg(null);
 
     try {
       const res = await fetch("/api/checkout/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cartItems: cart,
-          shippingAddress: finalShipping,
-          paymentMethod,
-        }),
+        body: JSON.stringify({ cartItems: cart, shippingAddress: finalShipping, paymentMethod }),
       });
-
       const data = await res.json();
-
-      if (!data.success) {
-        alert(data.error || "Failed to create order");
-        setLoading(false);
-        return;
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || "Failed to create order");
+        setPaymentState("failed");
+        return null;
       }
-
-      // Clear Cart
-      localStorage.removeItem("cart");
-
-      if (paymentMethod === "RAZORPAY") {
-        try {
-          await loadRazorpay();
-          initRazorpay(data.orderNumber, finalShipping);
-        } catch (err) {
-          console.error(err);
-          alert("Payment system failed to load. Please try again.");
-        }
-      } else {
-        // COD
-        router.push(`/order-success?orderNumber=${data.orderNumber}`);
-      }
-    } catch (err: any) {
-      console.error(err);
-      alert("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
+      activeOrderNumber.current = data.orderNumber;
+      return data.orderNumber;
+    } catch {
+      setErrorMsg("Network error. Please try again.");
+      setPaymentState("failed");
+      return null;
     }
-  };
+  }, [cart, savedAddresses, selectedAddressId, paymentMethod]);
 
-  const initRazorpay = async (orderNumber: string, shippingData: any) => {
-    if (window.__rzp_opened) return;
-    window.__rzp_opened = true;
+  const openRazorpay = useCallback(async (orderNumber: string) => {
+    destroyRzp();
 
     try {
-      const paymentRes = await fetch("/api/payment/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: subtotal }),
-      });
+      await ensureRazorpayScript();
+    } catch {
+      setErrorMsg("Payment system failed to load. Please try again.");
+      setPaymentState("failed");
+      return;
+    }
 
-      const order = await paymentRes.json();
+    const payRes = await fetch("/api/payment/create-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderNumber }),
+    });
 
-      const rzp = new window.Razorpay({
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-        amount: order.amount,
-        currency: "INR",
-        order_id: order.id,
-        name: "Zafy Fashion",
-        description: `Order #${orderNumber}`,
-        prefill: {
-          name: session?.user?.name || "",
-          email: session?.user?.email || "",
-          contact: shippingData.phone || "",
-        },
-        handler: async (response: any) => {
+    if (!payRes.ok) {
+      setErrorMsg("Failed to initiate payment. Please retry.");
+      setPaymentState("failed");
+      return;
+    }
+
+    const rzpOrder = await payRes.json();
+    const shippingData = savedAddresses.find((a) => a.id.toString() === selectedAddressId);
+
+    setPaymentState("awaiting_payment");
+
+    rzpInstanceRef.current = new window.Razorpay({
+      key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+      amount: rzpOrder.amount,
+      currency: "INR",
+      order_id: rzpOrder.id,
+      name: "Zafy Fashion",
+      description: `Order #${orderNumber}`,
+      prefill: {
+        name: session?.user?.name || "",
+        email: session?.user?.email || "",
+        contact: shippingData?.phone || "",
+      },
+      theme: { color: "#000000" },
+
+      handler: async (response: any) => {
+        setPaymentState("verifying");
+        try {
           const verifyRes = await fetch("/api/payment/verify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...response, orderNumber }),
           });
-
           const verifyData = await verifyRes.json();
-
-          window.__rzp_opened = false;
-
           if (verifyData.success) {
+            localStorage.removeItem("cart");
+            setPaymentState("success");
             router.push(`/order-success?orderNumber=${orderNumber}`);
           } else {
-            alert("Payment verification failed. Please contact support.");
+            setErrorMsg("Payment received but verification failed. Contact support with order #" + orderNumber);
+            setPaymentState("failed");
           }
-        },
-        modal: {
-          ondismiss: () => {
-            window.__rzp_opened = false;
-            alert("Payment was cancelled by user.");
-          },
-        },
-      });
+        } catch {
+          setErrorMsg("Verification network error. Contact support with order #" + orderNumber);
+          setPaymentState("failed");
+        } finally {
+          destroyRzp();
+        }
+      },
 
-      rzp.open();
-    } catch (err) {
-      console.error(err);
-      window.__rzp_opened = false;
-      alert("Payment failed or cancelled. Your order is still pending.");
+      modal: {
+        escape: false,
+        backdropclose: false,
+        ondismiss: () => {
+          destroyRzp();
+          // Order exists in DB — redirect to account so user can pay later
+          localStorage.removeItem("cart");
+          router.push(`/account?pending=${orderNumber}`);
+        },
+      },
+    });
+
+    rzpInstanceRef.current.on("payment.failed", (response: any) => {
+      console.error("Razorpay payment.failed:", response.error);
+      destroyRzp();
+      localStorage.removeItem("cart");
+      router.push(`/account?pending=${orderNumber}&reason=failed`);
+    });
+
+    rzpInstanceRef.current.open();
+  }, [session, savedAddresses, selectedAddressId, ensureRazorpayScript, destroyRzp, router]);
+
+  const processOrder = async () => {
+    if (!canCheckout) return;
+
+    if (paymentMethod === "COD") {
+      const orderNumber = await createOrder();
+      if (!orderNumber) return;
+      localStorage.removeItem("cart");
+      setPaymentState("success");
+      router.push(`/order-success?orderNumber=${orderNumber}`);
+      return;
     }
+
+    const orderNumber = await createOrder();
+    if (!orderNumber) return;
+    await openRazorpay(orderNumber);
   };
+
+  const maxAddressesReached = savedAddresses.length >= 5;
 
   return (
     <div className="bg-white min-h-screen">
@@ -213,107 +234,146 @@ export default function CheckoutPage() {
         <h1 className="text-4xl font-light text-center mb-10">Checkout</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
-          {/* Left - Address & Payment */}
+          {/* Left */}
           <div className="lg:col-span-3 space-y-10">
             <div>
-              <h2 className="text-2xl font-medium mb-6">Shipping Address</h2>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-medium">Shipping Address</h2>
+                {maxAddressesReached && (
+                  <span className="text-amber-600 text-sm">Max 5 addresses reached</span>
+                )}
+              </div>
 
-              {savedAddresses.length > 0 && (
-                <div className="space-y-3 mb-6">
+              {savedAddresses.length > 0 ? (
+                <div className="space-y-4">
                   {savedAddresses.map((addr: any) => (
                     <label
                       key={addr.id}
-                      className={`block border p-5 rounded-2xl cursor-pointer transition ${selectedAddressId === addr.id.toString() ? "border-black bg-gray-50" : "border-gray-200"
-                        }`}
+                      className={`block border p-6 rounded-3xl cursor-pointer transition-all hover:border-gray-400 ${
+                        selectedAddressId === addr.id?.toString()
+                          ? "border-black bg-gray-50 shadow-sm"
+                          : "border-gray-200"
+                      }`}
                     >
-                      <input
-                        type="radio"
-                        name="address"
-                        checked={selectedAddressId === addr.id.toString()}
-                        onChange={() => {
-                          setSelectedAddressId(addr.id.toString());
-                          setUseNewAddress(false);
-                        }}
-                      />
-                      <div className="ml-3">
-                        <strong>{addr.name}</strong> • {addr.phone}
-                        <p className="text-sm text-gray-600 mt-1">
-                          {addr.address}, {addr.city}, {addr.state} - {addr.pincode}
-                        </p>
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="radio"
+                          name="address"
+                          checked={selectedAddressId === addr.id?.toString()}
+                          onChange={() => setSelectedAddressId(addr.id?.toString() || null)}
+                          className="mt-1 accent-black"
+                        />
+                        <div>
+                          <div className="font-medium">{addr.name}</div>
+                          <div className="text-sm text-gray-600 mt-1">{addr.phone}</div>
+                          <div className="text-sm text-gray-600 mt-1">
+                            {addr.address}, {addr.city}, {addr.state} - {addr.pincode}
+                            {addr.landmark && ` (${addr.landmark})`}
+                          </div>
+                        </div>
                       </div>
                     </label>
                   ))}
                 </div>
-              )}
-
-              <button
-                onClick={() => setUseNewAddress(!useNewAddress)}
-                className="text-black underline text-sm"
-              >
-                {useNewAddress ? "Use saved address" : "+ Add new address"}
-              </button>
-
-              {useNewAddress && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                  <input name="name" placeholder="Full Name" value={newAddress.name} onChange={handleChange} className="border rounded-xl px-4 py-3" />
-                  <input name="phone" placeholder="Phone" value={newAddress.phone} onChange={handleChange} className="border rounded-xl px-4 py-3" />
-                  <input name="pincode" placeholder="Pincode" value={newAddress.pincode} onChange={handleChange} className="border rounded-xl px-4 py-3" />
-                  <input name="city" placeholder="City" value={newAddress.city} onChange={handleChange} className="border rounded-xl px-4 py-3" />
-                  <input name="state" placeholder="State" value={newAddress.state} onChange={handleChange} className="border rounded-xl px-4 py-3" />
-                  <textarea name="address" placeholder="Full Address" value={newAddress.address} onChange={handleChange} className="border rounded-xl px-4 py-3 md:col-span-2 h-24" />
-                  <input name="landmark" placeholder="Landmark" value={newAddress.landmark} onChange={handleChange} className="border rounded-xl px-4 py-3 md:col-span-2" />
+              ) : (
+                <div className="text-center py-12 border border-dashed border-gray-300 rounded-3xl">
+                  <p className="text-gray-500">No saved addresses found</p>
+                  <p className="text-sm text-gray-400 mt-2">Please add address from your Account → Addresses page</p>
                 </div>
               )}
             </div>
 
-            {/* Payment Method */}
             <div>
               <h2 className="text-2xl font-medium mb-6">Payment Method</h2>
               <div className="space-y-3">
-                <label className="flex items-center gap-3 border p-5 rounded-2xl cursor-pointer">
-                  <input type="radio" checked={paymentMethod === "COD"} onChange={() => setPaymentMethod("COD")} />
-                  Cash on Delivery (COD)
+                <label className="flex items-center gap-3 border p-5 rounded-3xl cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    checked={paymentMethod === "COD"}
+                    onChange={() => { setPaymentMethod("COD"); setErrorMsg(null); setPaymentState("idle"); }}
+                    className="accent-black"
+                  />
+                  <div>
+                    <div className="font-medium">Cash on Delivery (COD)</div>
+                    <div className="text-sm text-gray-500">Pay when your order arrives</div>
+                  </div>
                 </label>
-                <label className="flex items-center gap-3 border p-5 rounded-2xl cursor-pointer">
-                  <input type="radio" checked={paymentMethod === "RAZORPAY"} onChange={() => setPaymentMethod("RAZORPAY")} />
-                  Pay Online via Razorpay
+
+                <label className="flex items-center gap-3 border p-5 rounded-3xl cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="radio"
+                    checked={paymentMethod === "RAZORPAY"}
+                    onChange={() => { setPaymentMethod("RAZORPAY"); setErrorMsg(null); setPaymentState("idle"); }}
+                    className="accent-black"
+                  />
+                  <div>
+                    <div className="font-medium">Pay Online via Razorpay</div>
+                    <div className="text-sm text-gray-500">UPI, Credit/Debit Card, Net Banking, Wallet</div>
+                  </div>
                 </label>
               </div>
             </div>
           </div>
 
-          {/* Right - Order Summary */}
+          {/* Right */}
           <div className="lg:col-span-2">
             <div className="bg-gray-50 border border-gray-200 rounded-3xl p-8 sticky top-28">
               <h3 className="font-semibold text-lg mb-6">Order Summary</h3>
 
-              <div className="space-y-4 mb-6">
+              <div className="space-y-4 mb-6 max-h-80 overflow-auto">
                 {cart.map((item, i) => (
                   <div key={i} className="flex justify-between text-sm">
-                    <span>{item.title} × {item.quantity}</span>
-                    <span>₹{(item.price * item.quantity).toLocaleString()}</span>
+                    <span className="line-clamp-1 flex-1 pr-2">{item.title} × {item.quantity}</span>
+                    <span className="whitespace-nowrap">₹{(item.price * item.quantity).toLocaleString()}</span>
                   </div>
                 ))}
               </div>
 
-              <div className="border-t my-6"></div>
+              <div className="border-t my-6" />
 
               <div className="flex justify-between text-xl font-semibold">
                 <span>Total</span>
                 <span>₹{subtotal.toLocaleString()}</span>
               </div>
 
-              <button
-                onClick={processOrder}
-                disabled={loading || cart.length === 0}
-                className="w-full bg-black text-white py-4 rounded-2xl font-medium mt-8 hover:bg-gray-900 disabled:bg-gray-400 transition"
-              >
-                {loading ? "Processing..." : "Place Order"}
-              </button>
+              {paymentState === "verifying" && (
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-2xl text-sm text-blue-800">
+                  Verifying your payment, please wait…
+                </div>
+              )}
+
+              {paymentState === "failed" && errorMsg && (
+                <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-2xl text-sm text-red-800">
+                  {errorMsg}
+                </div>
+              )}
+
+              {(paymentState === "idle" || paymentState === "creating_order") && (
+                <button
+                  onClick={processOrder}
+                  disabled={!canCheckout}
+                  className="w-full bg-black text-white py-4 rounded-2xl font-medium mt-8 hover:bg-gray-900 disabled:bg-gray-400 transition"
+                >
+                  {paymentState === "creating_order"
+                    ? "Creating Order…"
+                    : paymentMethod === "COD"
+                    ? "Place Order (COD)"
+                    : "Pay Now with Razorpay"}
+                </button>
+              )}
+
+              {paymentState === "awaiting_payment" && (
+                <button disabled className="w-full bg-gray-800 text-white py-4 rounded-2xl font-medium mt-8 cursor-not-allowed">
+                  Complete Payment in Popup…
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      <WhatsappButton />
+      <Footer />
     </div>
   );
 }

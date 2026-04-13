@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
-import WishlistButton from "@/components/WishlistButton"; // ⭐ ADD
+import WishlistButton from "@/components/WishlistButton";
 
 interface Product {
   id: string | number;
@@ -16,11 +16,20 @@ interface Product {
   stockQuantity?: number;
 }
 
-export default function ProductCard({ product }: { product: Product }) {
+type ProductCardProps = {
+  product: Product;
+  showStockStatus?: boolean; // ✅ optional prop
+};
+
+export default function ProductCard({
+  product,
+  showStockStatus,
+}: ProductCardProps) {
   const [isAdding, setIsAdding] = useState(false);
 
   const discount = product.discountPercentage || 0;
   const imageUrl = product.images?.[0] || "/placeholder.jpg";
+
   const hasDiscount =
     discount > 0 &&
     product.compareAtPrice &&
@@ -52,6 +61,8 @@ export default function ProductCard({ product }: { product: Product }) {
     }, 600);
   };
 
+  const inStock = (product.stockQuantity ?? 0) > 0;
+
   return (
     <div className="group relative border border-gray-200 rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 bg-white">
 
@@ -70,30 +81,31 @@ export default function ProductCard({ product }: { product: Product }) {
 
       </div>
 
-      {/* Sale Badge */}
+      {/* 🔥 SALE BADGE */}
       {hasDiscount && (
         <div className="absolute top-3 left-3 z-10 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full">
           SALE
         </div>
       )}
 
-      {/* Product Image */}
+      {/* PRODUCT IMAGE */}
       <div className="relative aspect-square bg-gray-50">
         <Image
           src={imageUrl}
           alt={product.title}
           fill
-          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"   // ← Added
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           className="object-cover group-hover:scale-105 transition-transform duration-500"
         />
       </div>
 
-      {/* Content */}
+      {/* CONTENT */}
       <div className="p-4">
         <h3 className="font-medium text-sm line-clamp-2 min-h-[42px]">
           {product.title}
         </h3>
 
+        {/* PRICE */}
         <div className="flex items-baseline gap-2 mt-3">
           <span className="text-xl font-semibold">₹{product.price}</span>
           {hasDiscount && (
@@ -103,15 +115,31 @@ export default function ProductCard({ product }: { product: Product }) {
           )}
         </div>
 
-        {/* Add to Cart */}
+        {/* ✅ STOCK STATUS */}
+        {showStockStatus && (
+          <p
+            className={`text-xs mt-2 font-medium ${
+              inStock ? "text-green-600" : "text-red-500"
+            }`}
+          >
+            {inStock ? "In Stock" : "Out of Stock"}
+          </p>
+        )}
+
+        {/* ADD TO CART */}
         <button
           onClick={addToCart}
-          disabled={isAdding}
+          disabled={isAdding || !inStock}
           className="mt-4 w-full bg-black hover:bg-gray-800 disabled:bg-gray-400 text-white py-3 rounded-xl text-sm font-medium transition"
         >
-          {isAdding ? "Adding..." : "Add to Cart →"}
+          {isAdding
+            ? "Adding..."
+            : inStock
+            ? "Add to Cart →"
+            : "Out of Stock"}
         </button>
 
+        {/* VIEW DETAILS */}
         <Link
           href={`/product/${product.id}`}
           className="block text-center text-xs text-gray-500 mt-3 hover:underline"
