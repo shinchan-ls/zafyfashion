@@ -1,10 +1,9 @@
-// app/api/payment/verify/route.ts
+
 import { prisma } from "@/lib/prisma";
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import crypto from "crypto";
 import { pushToSelloship } from "@/app/api/checkout/create/route";
 import { checkRateLimit } from "@/lib/ratelimit";
-import { NextRequest } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,43 +19,52 @@ export async function POST(req: NextRequest) {
     } = body;
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return NextResponse.json({ error: "Missing payment fields" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing payment fields" },
+        { status: 400 }
+      );
     }
 
-    // ── Signature verification (HMAC-SHA256) ────────────────────────────────────
+    // ── Signature verification (HMAC-SHA256) ─────────────────────────────
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    // timingSafeEqual prevents timing-based attacks
     const signaturesMatch = crypto.timingSafeEqual(
       Buffer.from(expectedSignature, "hex"),
-      Buffer.from(razorpay_signature,  "hex")
+      Buffer.from(razorpay_signature, "hex")
     );
 
     if (!signaturesMatch) {
       console.error("Signature mismatch");
-      return NextResponse.json({ error: "Invalid payment signature" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid payment signature" },
+        { status: 400 }
+      );
     }
 
-    // ── Find order by razorpayOrderId — never trust orderNumber from frontend ───
+    // ── Find order ───────────────────────────────────────────────────────
     const order = await prisma.order.findUnique({
       where: { razorpayOrderId: razorpay_order_id },
     });
 
     if (!order) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Order not found" },
+        { status: 404 }
+      );
     }
 
-    // ── Idempotency: webhook may have already processed this ────────────────────
+    // ── Idempotency check ────────────────────────────────────────────────
     if (order.paymentStatus === "PAID") {
       console.log("Already paid (webhook ran first):", order.orderNumber);
       return NextResponse.json({ success: true });
     }
 
-    // ── Atomic transaction: mark paid + race-condition-proof stock deduction ────
-    const updatedOrder = await prisma.$transaction(async (tx: typeof prisma) => {
+    // ── Atomic transaction ───────────────────────────────────────────────
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      // 1. Mark order as paid
       const updated = await tx.order.update({
         where: { id: order.id },
         data: {
@@ -66,27 +74,26 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      // 2. Fetch order items
       const orderItems = await tx.orderItem.findMany({
         where: { orderId: order.id },
       });
 
+      // 3. Deduct stock safely
       for (const item of orderItems) {
-        // RACE-CONDITION FIX:
-        // updateMany with WHERE stockQuantity >= quantity
-        // Two simultaneous transactions: only ONE will match the WHERE clause.
-        // The other gets count=0 — stock can never go below 0.
         const result = await tx.product.updateMany({
           where: {
-            id: item.productId,
+            id: item.productId, // BigInt safe
             stockQuantity: { gte: item.quantity },
           },
-          data: { stockQuantity: { decrement: item.quantity } },
+          data: {
+            stockQuantity: { decrement: item.quantity },
+          },
         });
 
         if (result.count === 0) {
-          // Payment is real — log for manual fulfilment, don't throw
           console.error(
-            `Insufficient stock: product ${item.productId}, order ${order.orderNumber} — manual review needed`
+            `⚠️ Stock issue: product ${item.productId}, order ${order.orderNumber}`
           );
         }
       }
@@ -96,6 +103,7 @@ export async function POST(req: NextRequest) {
 
     console.log(`Payment verified: ${updatedOrder.orderNumber}`);
 
+    // ── Async fulfillment (non-blocking) ─────────────────────────────────
     pushToSelloship(updatedOrder).catch((err) =>
       console.error("Selloship async error (verify):", err)
     );
@@ -104,6 +112,10 @@ export async function POST(req: NextRequest) {
 
   } catch (err: any) {
     console.error("VERIFY ERROR:", err);
-    return NextResponse.json({ error: "Verification failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Verification failed" },
+      { status: 500 }
+    );
   }
 }
+
