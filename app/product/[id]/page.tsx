@@ -1,4 +1,3 @@
-// app/product/[id]/page.tsx
 "use client";
 
 import Image from "next/image";
@@ -7,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import WhatsappButton from "@/components/WhatsappButton";
+import { viewContent, addToCart as trackAddToCart } from "@/lib/metaPixel";
 
 interface Product {
   id: string;
@@ -37,9 +37,17 @@ export default function ProductDetail() {
       try {
         const res = await fetch(`/api/products/${id}`);
         if (!res.ok) throw new Error("Product not found");
+
         const data = await res.json();
+
         setProduct(data);
         setSelectedImage(0);
+
+        viewContent(
+          data.id.toString(),
+          data.title,
+          Number(data.price)
+        );
       } catch (err) {
         console.error(err);
       } finally {
@@ -54,9 +62,13 @@ export default function ProductDetail() {
     if (!product || quantity > product.stockQuantity) return;
 
     setAddingToCart(true);
+
     try {
       const cart = JSON.parse(localStorage.getItem("cart") || "[]");
-      const existing = cart.findIndex((item: any) => item.id === product.id);
+
+      const existing = cart.findIndex(
+        (item: any) => item.id === product.id
+      );
 
       if (existing !== -1) {
         cart[existing].quantity += quantity;
@@ -71,8 +83,15 @@ export default function ProductDetail() {
       }
 
       localStorage.setItem("cart", JSON.stringify(cart));
+
+      trackAddToCart(
+        product.id.toString(),
+        product.title,
+        Number(product.price) * quantity
+      );
+
       alert(`${quantity} × ${product.title} added to cart ✓`);
-    } catch (err) {
+    } catch {
       alert("Failed to add to cart");
     } finally {
       setAddingToCart(false);
@@ -80,15 +99,18 @@ export default function ProductDetail() {
   };
 
   if (loading) return <div className="text-center py-20">Loading...</div>;
-  if (!product) return <div className="text-center py-20 text-red-600">Product not found</div>;
+  if (!product) return <div className="text-center py-20">Product not found</div>;
 
-  const discount = product.compareAtPrice 
-    ? Math.round(((product.compareAtPrice - product.price) / product.compareAtPrice) * 100) 
+  const discount = product.compareAtPrice
+    ? Math.round(
+        ((product.compareAtPrice - product.price) /
+          product.compareAtPrice) *
+          100
+      )
     : 0;
 
   const isOutOfStock = product.stockQuantity <= 0;
   const canIncrease = quantity < product.stockQuantity;
-
   return (
     <div className="bg-white min-h-screen">
       <Navbar />

@@ -8,6 +8,7 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import WhatsappButton from "@/components/WhatsappButton";
+import { initiateCheckout } from "@/lib/metaPixel";
 
 declare global {
   interface Window { Razorpay: any; }
@@ -15,19 +16,19 @@ declare global {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const INDIAN_STATES = [
-  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa",
-  "Gujarat","Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala",
-  "Madhya Pradesh","Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland",
-  "Odisha","Punjab","Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura",
-  "Uttar Pradesh","Uttarakhand","West Bengal","Andaman and Nicobar Islands",
-  "Chandigarh","Dadra and Nagar Haveli and Daman and Diu","Delhi",
-  "Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry",
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa",
+  "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala",
+  "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland",
+  "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura",
+  "Uttar Pradesh", "Uttarakhand", "West Bengal", "Andaman and Nicobar Islands",
+  "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi",
+  "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry",
 ];
 
-const EMPTY_FORM = { name:"", phone:"", address:"", city:"", state:"", pincode:"", landmark:"" };
+const EMPTY_FORM = { name: "", phone: "", address: "", city: "", state: "", pincode: "", landmark: "" };
 
-type PaymentState = "idle"|"creating_order"|"awaiting_payment"|"verifying"|"success"|"failed";
-type FieldErrors  = Record<string, string>;
+type PaymentState = "idle" | "creating_order" | "awaiting_payment" | "verifying" | "success" | "failed";
+type FieldErrors = Record<string, string>;
 
 // ─── AddressForm (OUTSIDE checkout component — prevents focus loss on re-render)
 type AddressFormProps = {
@@ -57,11 +58,10 @@ function AddressForm({ form, setField, fieldErrors, loading, onSave, onCancel }:
         placeholder={placeholder}
         autoComplete="off"
         onChange={(e) => setField(id)(e.target.value)}
-        className={`w-full border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 transition ${
-          fieldErrors[id]
+        className={`w-full border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 transition ${fieldErrors[id]
             ? "border-red-400 focus:ring-red-100"
             : "border-gray-300 focus:border-black focus:ring-black/10"
-        }`}
+          }`}
       />
       {fieldErrors[id] && <p className="text-red-500 text-xs mt-1">⚠ {fieldErrors[id]}</p>}
     </div>
@@ -71,10 +71,10 @@ function AddressForm({ form, setField, fieldErrors, loading, onSave, onCancel }:
     <div className="border border-gray-200 rounded-2xl p-5 bg-gray-50/50 space-y-3">
       <h3 className="font-medium text-sm mb-1">New Delivery Address</h3>
       <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2 sm:col-span-1">{inp("name",    "Full Name",    "Rahul Sharma",              { required: true })}</div>
-        <div className="col-span-2 sm:col-span-1">{inp("phone",   "Mobile No.",   "9876543210",                { required: true, type: "tel", maxLength: 10 })}</div>
-        <div className="col-span-2">               {inp("address", "Flat/Street",  "Flat 101, MG Road",         { required: true })}</div>
-        <div>                                      {inp("city",    "City",         "Surat",                     { required: true })}</div>
+        <div className="col-span-2 sm:col-span-1">{inp("name", "Full Name", "Rahul Sharma", { required: true })}</div>
+        <div className="col-span-2 sm:col-span-1">{inp("phone", "Mobile No.", "9876543210", { required: true, type: "tel", maxLength: 10 })}</div>
+        <div className="col-span-2">               {inp("address", "Flat/Street", "Flat 101, MG Road", { required: true })}</div>
+        <div>                                      {inp("city", "City", "Surat", { required: true })}</div>
 
         {/* State dropdown — also OUTSIDE component prevents remount */}
         <div>
@@ -84,9 +84,8 @@ function AddressForm({ form, setField, fieldErrors, loading, onSave, onCancel }:
           <select
             value={form.state}
             onChange={(e) => setField("state")(e.target.value)}
-            className={`w-full border px-3 py-2.5 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 transition ${
-              fieldErrors.state ? "border-red-400 focus:ring-red-100" : "border-gray-300 focus:border-black focus:ring-black/10"
-            }`}
+            className={`w-full border px-3 py-2.5 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 transition ${fieldErrors.state ? "border-red-400 focus:ring-red-100" : "border-gray-300 focus:border-black focus:ring-black/10"
+              }`}
           >
             <option value="">Select state</option>
             {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -94,7 +93,7 @@ function AddressForm({ form, setField, fieldErrors, loading, onSave, onCancel }:
           {fieldErrors.state && <p className="text-red-500 text-xs mt-1">⚠ {fieldErrors.state}</p>}
         </div>
 
-        <div>{inp("pincode",  "Pincode",  "395001",             { required: true, maxLength: 6 })}</div>
+        <div>{inp("pincode", "Pincode", "395001", { required: true, maxLength: 6 })}</div>
         <div>{inp("landmark", "Landmark", "Near City Mall (optional)")}</div>
       </div>
 
@@ -118,11 +117,11 @@ function AddressForm({ form, setField, fieldErrors, loading, onSave, onCancel }:
 function validateAddr(form: typeof EMPTY_FORM): FieldErrors {
   const e: FieldErrors = {};
   if (!form.name.trim() || form.name.trim().length < 2) e.name = "At least 2 characters";
-  if (!/^\d{10}$/.test(form.phone.trim()))               e.phone = "Valid 10-digit number (no +91)";
+  if (!/^\d{10}$/.test(form.phone.trim())) e.phone = "Valid 10-digit number (no +91)";
   if (!form.address.trim() || form.address.trim().length < 10) e.address = "Complete address required (min 10 chars)";
-  if (!form.city.trim())                                 e.city = "Required";
-  if (!form.state)                                       e.state = "Select a state";
-  if (!/^\d{6}$/.test(form.pincode.trim()))              e.pincode = "Valid 6-digit pincode";
+  if (!form.city.trim()) e.city = "Required";
+  if (!form.state) e.state = "Select a state";
+  if (!/^\d{6}$/.test(form.pincode.trim())) e.pincode = "Valid 6-digit pincode";
   return e;
 }
 
@@ -131,19 +130,19 @@ export default function CheckoutPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [cart,              setCart]              = useState<any[]>([]);
-  const [savedAddresses,    setSavedAddresses]    = useState<any[]>([]);
+  const [cart, setCart] = useState<any[]>([]);
+  const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
-  const [showAddForm,       setShowAddForm]       = useState(false);
-  const [addrLoading,       setAddrLoading]       = useState(false);
-  const [addrFieldErrors,   setAddrFieldErrors]   = useState<FieldErrors>({});
-  const [addrForm,          setAddrForm]          = useState({ ...EMPTY_FORM });
-  const [paymentMethod,     setPaymentMethod]     = useState<"COD"|"RAZORPAY">("COD");
-  const [paymentState,      setPaymentState]      = useState<PaymentState>("idle");
-  const [errorMsg,          setErrorMsg]          = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addrLoading, setAddrLoading] = useState(false);
+  const [addrFieldErrors, setAddrFieldErrors] = useState<FieldErrors>({});
+  const [addrForm, setAddrForm] = useState({ ...EMPTY_FORM });
+  const [paymentMethod, setPaymentMethod] = useState<"COD" | "RAZORPAY">("COD");
+  const [paymentState, setPaymentState] = useState<PaymentState>("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const rzpRef        = useRef<any>(null);
-  const rzpScriptRef  = useRef(false);
+  const rzpRef = useRef<any>(null);
+  const rzpScriptRef = useRef(false);
 
   // ── Setfield helper (stable ref, no re-render issue) ──────────────────────
   const setAddrField = useCallback((k: keyof typeof EMPTY_FORM) => (v: string) => {
@@ -159,7 +158,7 @@ export default function CheckoutPage() {
   // ── Load addresses ─────────────────────────────────────────────────────────
   const loadAddresses = useCallback(async () => {
     try {
-      const res  = await fetch("/api/user/addresses", { cache: "no-store" });
+      const res = await fetch("/api/user/addresses", { cache: "no-store" });
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       setSavedAddresses(list);
@@ -187,16 +186,16 @@ export default function CheckoutPage() {
     setAddrLoading(true);
     setErrorMsg(null);
     try {
-      const res  = await fetch("/api/user/addresses", {
+      const res = await fetch("/api/user/addresses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name:     addrForm.name.trim(),
-          phone:    addrForm.phone.trim(),
-          address:  addrForm.address.trim(),
-          city:     addrForm.city.trim(),
-          state:    addrForm.state,
-          pincode:  addrForm.pincode.trim(),
+          name: addrForm.name.trim(),
+          phone: addrForm.phone.trim(),
+          address: addrForm.address.trim(),
+          city: addrForm.city.trim(),
+          state: addrForm.state,
+          pincode: addrForm.pincode.trim(),
           landmark: addrForm.landmark.trim(),
         }),
       });
@@ -221,14 +220,14 @@ export default function CheckoutPage() {
       const s = document.createElement("script");
       s.src = "https://checkout.razorpay.com/v1/checkout.js";
       s.async = true;
-      s.onload  = () => { rzpScriptRef.current = true; resolve(); };
+      s.onload = () => { rzpScriptRef.current = true; resolve(); };
       s.onerror = () => reject(new Error("Razorpay failed to load"));
       document.body.appendChild(s);
     });
   }, []);
 
   const destroyRzp = useCallback(() => {
-    try { rzpRef.current?.close(); } catch {}
+    try { rzpRef.current?.close(); } catch { }
     rzpRef.current = null;
     document.querySelectorAll('iframe[src*="razorpay"]').forEach(e => e.remove());
     document.querySelectorAll(".razorpay-backdrop").forEach(e => e.remove());
@@ -237,10 +236,14 @@ export default function CheckoutPage() {
   useEffect(() => () => destroyRzp(), [destroyRzp]);
 
   // ── Order process ──────────────────────────────────────────────────────────
-  const subtotal   = cart.reduce((s, i) => s + Number(i.price) * Number(i.quantity), 0);
-  const isLoading  = ["creating_order","awaiting_payment","verifying"].includes(paymentState);
+  const subtotal = cart.reduce((s, i) => s + Number(i.price) * Number(i.quantity), 0);
+  const isLoading = ["creating_order", "awaiting_payment", "verifying"].includes(paymentState);
   const canCheckout = !isLoading && cart.length > 0 && !!selectedAddressId;
-
+  useEffect(() => {
+    if (cart.length > 0 && subtotal > 0) {
+      initiateCheckout(subtotal);
+    }
+  }, [cart, subtotal]);
   const processOrder = async () => {
     if (!canCheckout) return;
     const addr = savedAddresses.find(a => a.id.toString() === selectedAddressId);
@@ -250,7 +253,7 @@ export default function CheckoutPage() {
     setPaymentState("creating_order");
 
     try {
-      const res  = await fetch("/api/checkout/create", {
+      const res = await fetch("/api/checkout/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cartItems: cart, shippingAddress: addr, paymentMethod }),
@@ -272,7 +275,7 @@ export default function CheckoutPage() {
       }
 
       // Razorpay flow
-      const payRes  = await fetch("/api/payment/create-order", {
+      const payRes = await fetch("/api/payment/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderNumber }),
@@ -284,18 +287,18 @@ export default function CheckoutPage() {
       setPaymentState("awaiting_payment");
 
       rzpRef.current = new window.Razorpay({
-        key:         process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-        amount:      rzpOrder.amount,
-        currency:    "INR",
-        order_id:    rzpOrder.id,
-        name:        "Zafy Fashion",
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: rzpOrder.amount,
+        currency: "INR",
+        order_id: rzpOrder.id,
+        name: "Zafy Fashion",
         description: `Order #${orderNumber}`,
-        prefill:     { name: session?.user?.name || "", email: session?.user?.email || "", contact: addr.phone || "" },
-        theme:       { color: "#000000" },
+        prefill: { name: session?.user?.name || "", email: session?.user?.email || "", contact: addr.phone || "" },
+        theme: { color: "#000000" },
         handler: async (response: any) => {
           setPaymentState("verifying");
           try {
-            const vRes  = await fetch("/api/payment/verify", {
+            const vRes = await fetch("/api/payment/verify", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ ...response, orderNumber }),
@@ -310,7 +313,7 @@ export default function CheckoutPage() {
               setPaymentState("failed");
             }
           } catch { setErrorMsg("Verification error"); setPaymentState("failed"); }
-          finally  { destroyRzp(); }
+          finally { destroyRzp(); }
         },
         modal: {
           escape: false, backdropclose: false,
@@ -400,11 +403,10 @@ export default function CheckoutPage() {
                   {savedAddresses.map((addr: any) => (
                     <label
                       key={addr.id}
-                      className={`flex gap-3 items-start border p-4 rounded-2xl cursor-pointer transition ${
-                        selectedAddressId === addr.id.toString()
+                      className={`flex gap-3 items-start border p-4 rounded-2xl cursor-pointer transition ${selectedAddressId === addr.id.toString()
                           ? "border-black bg-gray-50 shadow-sm"
                           : "border-gray-200 hover:border-gray-300"
-                      }`}
+                        }`}
                     >
                       <input
                         type="radio"
@@ -463,19 +465,18 @@ export default function CheckoutPage() {
               <h2 className="text-xl font-semibold mb-4">Payment Method</h2>
               <div className="space-y-3">
                 {[
-                  { val: "COD",      label: "Cash on Delivery",        sub: "Pay when your order arrives" },
+                  { val: "COD", label: "Cash on Delivery", sub: "Pay when your order arrives" },
                   { val: "RAZORPAY", label: "Pay Online via Razorpay", sub: "UPI, Card, Net Banking, Wallet" },
                 ].map(opt => (
                   <label
                     key={opt.val}
-                    className={`flex items-center gap-3 border p-4 rounded-2xl cursor-pointer transition ${
-                      paymentMethod === opt.val ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-300"
-                    }`}
+                    className={`flex items-center gap-3 border p-4 rounded-2xl cursor-pointer transition ${paymentMethod === opt.val ? "border-black bg-gray-50" : "border-gray-200 hover:border-gray-300"
+                      }`}
                   >
                     <input
                       type="radio"
                       checked={paymentMethod === opt.val}
-                      onChange={() => setPaymentMethod(opt.val as "COD"|"RAZORPAY")}
+                      onChange={() => setPaymentMethod(opt.val as "COD" | "RAZORPAY")}
                       className="accent-black"
                     />
                     <div>
