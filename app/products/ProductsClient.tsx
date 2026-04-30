@@ -8,6 +8,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import WhatsappButton from "@/components/WhatsappButton";
 import { useWishlist } from "@/app/context/WishlistContext";
+import { useSearchParams } from "next/navigation";
 
 type Product = {
   id: string;
@@ -36,24 +37,25 @@ const LIMIT = 24;
 export default function ProductsClient() {
   const { isWishlisted, toggleWishlist } = useWishlist();
 
-  const [products, setProducts]             = useState<Product[]>([]);
-  const [total, setTotal]                   = useState(0);
-  const [hasMore, setHasMore]               = useState(true);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [loadingMore, setLoadingMore]       = useState(false);
-  const [sortOption, setSortOption]         = useState("newest");
-  const [showInStock, setShowInStock]       = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [sortOption, setSortOption] = useState("newest");
+  const [showInStock, setShowInStock] = useState(true);
   const [showOutOfStock, setShowOutOfStock] = useState(false);
-  const [minPrice, setMinPrice]             = useState(0);
-  const [maxPrice, setMaxPrice]             = useState(999999);
-  const [priceInitted, setPriceInitted]     = useState(false);
-  const [filterOpen, setFilterOpen]         = useState(false);
+  const [minPrice, setMinPrice] = useState(0);
+  const [maxPrice, setMaxPrice] = useState(999999);
+  const [priceInitted, setPriceInitted] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
 
-  const loaderRef   = useRef<HTMLDivElement>(null);
-  const pageRef     = useRef(1);
+  const loaderRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(1);
   const fetchingRef = useRef(false);
-  const seenIds     = useRef(new Set<string>());
-
+  const seenIds = useRef(new Set<string>());
+  const searchParams = useSearchParams();
+  const search = searchParams.get("search") || "";
   const fetchPage = useCallback(async (pageNum: number, signal?: AbortSignal) => {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
@@ -61,7 +63,7 @@ export default function ProductsClient() {
     else setLoadingMore(true);
 
     try {
-      const res = await fetch(`/api/products?limit=${LIMIT}&page=${pageNum}`, { signal });
+      const res = await fetch(`/api/products?limit=${LIMIT}&page=${pageNum}&search=${search}`, { signal });
       if (!res.ok) throw new Error("fetch error");
       const data = await res.json();
 
@@ -72,7 +74,7 @@ export default function ProductsClient() {
 
       // ✅ Total fix: use server total if provided, else keep accumulating
       const serverTotal = typeof data.total === "number" ? data.total : 0;
-      const hasNext     = typeof data.hasNextPage === "boolean"
+      const hasNext = typeof data.hasNextPage === "boolean"
         ? data.hasNextPage
         : items.length === LIMIT;
 
@@ -95,7 +97,7 @@ export default function ProductsClient() {
       setInitialLoading(false);
       setLoadingMore(false);
     }
-  }, [priceInitted]);
+  }, [priceInitted, search]);
 
   // ✅ RACE CONDITION FIX — same as category page:
   // StrictMode: Effect1 sets fetchingRef=true → Cleanup1 calls ac.abort() before finally runs →
@@ -137,23 +139,30 @@ export default function ProductsClient() {
     return () => { if (el) observer.unobserve(el); };
   }, [hasMore, initialLoading, fetchPage]);
 
+  useEffect(() => {
+    seenIds.current.clear();
+    pageRef.current = 1;
+    setProducts([]);
+    fetchPage(1);
+  }, [search]);
+  
   const displayProducts = useMemo(() => {
     let result = products.filter(p => {
-      const price   = Number(p.price) || 0;
+      const price = Number(p.price) || 0;
       const inStock = p.stockQuantity > 0;
       return (
         price >= minPrice && price <= maxPrice &&
         ((showInStock && inStock) || (showOutOfStock && !inStock))
       );
     });
-    if (sortOption === "price-low")  result.sort((a, b) => a.price - b.price);
+    if (sortOption === "price-low") result.sort((a, b) => a.price - b.price);
     if (sortOption === "price-high") result.sort((a, b) => b.price - a.price);
-    if (sortOption === "name-az")    result.sort((a, b) => a.title.localeCompare(b.title));
-    if (sortOption === "discount")   result.sort((a, b) => b.discountPercentage - a.discountPercentage);
+    if (sortOption === "name-az") result.sort((a, b) => a.title.localeCompare(b.title));
+    if (sortOption === "discount") result.sort((a, b) => b.discountPercentage - a.discountPercentage);
     return result;
   }, [products, minPrice, maxPrice, showInStock, showOutOfStock, sortOption]);
 
-  const inStockCount    = products.filter(p => p.stockQuantity > 0).length;
+  const inStockCount = products.filter(p => p.stockQuantity > 0).length;
   const outOfStockCount = products.filter(p => p.stockQuantity === 0).length;
   const hasActiveFilters = !showInStock || showOutOfStock || minPrice > 0;
 
